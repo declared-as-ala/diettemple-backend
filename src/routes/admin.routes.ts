@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import Product from '../models/Product.model';
 import Order from '../models/Order.model';
 import User from '../models/User.model';
@@ -45,18 +46,31 @@ router.use('/recipes', recipesRoutes);
 // requireAdmin will check the role
 
 // Legacy video dir (for deleting old uploads that used /api/videos)
-const legacyVideoDir = path.join(__dirname, '../../storage/video');
-if (!fs.existsSync(legacyVideoDir)) {
-  fs.mkdirSync(legacyVideoDir, { recursive: true });
+// On Vercel/serverless, filesystem is read-only except /tmp — use tmp to avoid crash
+const isVercel = !!process.env.VERCEL;
+const legacyVideoDir = isVercel
+  ? path.join(os.tmpdir(), 'diettemple', 'storage', 'video')
+  : path.join(__dirname, '../../storage/video');
+try {
+  if (!fs.existsSync(legacyVideoDir)) {
+    fs.mkdirSync(legacyVideoDir, { recursive: true });
+  }
+} catch {
+  // Ignore on read-only filesystem (e.g. Vercel serverless)
 }
 
-// New uploads go to storage/public/exercises/videos/{exerciseId}/ (served at /media)
-const exercisesVideosRoot = path.join(getStoragePublicRoot(), 'exercises', 'videos');
+// New uploads: use writable root (tmp on Vercel, else storage/public)
+const writableRoot = isVercel ? path.join(os.tmpdir(), 'diettemple', 'public') : getStoragePublicRoot();
+const exercisesVideosRoot = path.join(writableRoot, 'exercises', 'videos');
 const videoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const id = sanitizeSegment((req as any).params?.id || 'unknown');
     const dir = path.join(exercisesVideosRoot, id);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      return cb(e as Error, dir);
+    }
     cb(null, dir);
   },
   filename: (req, file, cb) => {
