@@ -117,6 +117,9 @@ app.use('/api/foods', authenticate, foodsRoutes);
 app.use('/api/recipes', recipesRoutes);
 app.use('/api/admin', authenticate, requireAdmin, adminRoutes);
 
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'DietTemple API', health: '/health' });
+});
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'DietTemple API is running' });
 });
