@@ -1,12 +1,42 @@
 /**
- * Vercel serverless entry: wraps Express app and ensures MongoDB is connected.
- * Root and /health skip DB so they respond fast (avoids cold-start timeout).
+ * Vercel serverless entry. Root /health /favicon.ico respond immediately
+ * without loading Express or MongoDB to avoid 300s timeout.
  */
 import mongoose from 'mongoose';
-import serverless from 'serverless-http';
-import app from '../src/app';
 
 let dbConnected = false;
+let handler: (req: any, res: any) => Promise<any> | void;
+
+function getPath(req: any): string {
+  const raw = (req.url || req.path || req.originalUrl || '') as string;
+  const path = raw.split('?')[0].toLowerCase().replace(/\/+$/, '') || '/';
+  return path;
+}
+
+function isQuickPath(req: any): boolean {
+  if (req.method !== 'GET') return false;
+  const path = getPath(req);
+  return path === '/' || path === '/health' || path === '/favicon.ico';
+}
+
+function sendQuickResponse(res: any, path: string): void {
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/json');
+  const body =
+    path === '/health'
+      ? JSON.stringify({ status: 'OK', message: 'DietTemple API is running' })
+      : JSON.stringify({ status: 'ok', message: 'DietTemple API', health: '/health' });
+  res.setHeader('Content-Length', Buffer.byteLength(body));
+  res.end(body);
+}
+
+async function getHandler(): Promise<(req: any, res: any) => Promise<any> | void> {
+  if (handler) return handler;
+  const serverless = (await import('serverless-http')).default;
+  const app = (await import('../src/app')).default;
+  handler = serverless(app);
+  return handler;
+}
 
 async function ensureDb(): Promise<void> {
   if (dbConnected) return;
@@ -21,17 +51,12 @@ async function ensureDb(): Promise<void> {
   dbConnected = true;
 }
 
-const handler = serverless(app);
-
-function isHealthOrRoot(req: any): boolean {
-  const path = ((req.url || req.path || '') as string).split('?')[0].replace(/\/$/, '') || '/';
-  return req.method === 'GET' && (path === '/' || path === '/health');
-}
-
 export default async function (req: any, res: any) {
-  if (isHealthOrRoot(req)) {
-    return handler(req, res);
+  if (isQuickPath(req)) {
+    sendQuickResponse(res, getPath(req));
+    return;
   }
   await ensureDb();
-  return handler(req, res);
+  const h = await getHandler();
+  return h(req, res);
 }
