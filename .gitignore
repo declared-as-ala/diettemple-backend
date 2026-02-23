@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+uploads/*
+!uploads/.gitkeep
+storage/*
+!storage/.gitkeep
+.venv/
+__pycache__/
+*.pyc
+*.log
+coverage/
+.DS_Store
+.vercel
+*.tsbuildinfo
+
+# Vision service + large models (optional; download separately if needed)
+vision-service/
+*.caffemodel
