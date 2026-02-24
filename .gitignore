@@ -17,6 +17,10 @@ coverage/
 .vercel
 *.tsbuildinfo
 
+# Avoid conflict with api/index.ts (Vercel compiles .ts)
+api/*.js
+api/*.mjs
+
 # Vision service + large models (optional; download separately if needed)
 vision-service/
 *.caffemodel
