@@ -1,5 +1,19 @@
 # Deploy DietTemple Backend to Vercel
 
+## Fix: "Missing public directory" / "Missing build script"
+
+This project is **API-only** (serverless functions in `api/`). Vercel must not expect a frontend build or a `public` folder.
+
+1. Open **Vercel Dashboard** → your project → **Settings** → **Build & Development Settings**.
+2. Set **Framework Preset** to **Other** (or "No framework").
+3. **Build Command**: leave **empty** or delete any value (the build is defined in `vercel.json` via `builds`).
+4. **Output Directory**: leave **empty** or delete any value. Do **not** set `public` or `dist` — there is no static output.
+5. Save and **Redeploy**.
+
+If **Root Directory** is set, it must point to the folder that contains `vercel.json` and the `api/` folder (e.g. `backend`).
+
+---
+
 If **Vercel does not auto-deploy when you push**, use one of these approaches.
 
 ---
