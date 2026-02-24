@@ -1,5 +1,14 @@
 # Deploy DietTemple Backend to Vercel
 
+## Why `/api/*` routes work (path preservation)
+
+Requests to `/api/products`, `/api/orders`, etc. must reach Express with the correct path. The rewrite `/(.*) -> /api` would send every request to the same handler with path `/api`, so only the root responded. The fix:
+
+- **`api/[[...path]].ts`** (catch-all) handles `/api/anything`. It reconstructs `req.url` from `req.query.path` and calls the same handler as `api/index.ts`.
+- **vercel.json** rewrites `/api/(.*)` to `/api/$1` so the path is preserved; only then does the catch-all run with the right segments.
+
+Root `/` and `/health` still rewrite to `/api` and are answered by `api/index.ts` without loading Express.
+
 ## Fix: "Missing public directory" / "Missing build script"
 
 This project is **API-only** (serverless functions in `api/`). Vercel must not expect a frontend build or a `public` folder.

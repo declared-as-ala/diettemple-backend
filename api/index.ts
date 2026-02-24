@@ -1,12 +1,11 @@
 /**
- * Vercel serverless entry. Root /health /favicon.ico respond immediately
- * without loading Express or MongoDB. Other routes: init DB + app in parallel;
- * if init takes too long (cold start), return 503 so client can retry instead of 300s timeout.
+ * Vercel serverless entry. Uses src/app.ts (Express app) only — never src/index.ts (app.listen).
+ * /health and /favicon.ico respond without loading Express or MongoDB.
+ * Other routes: cached Mongo + Express in parallel; fast-fail 503 if init or DB times out.
  */
-const STARTUP_TIMEOUT_MS = 55_000; // Return 503 before Vercel kills at 60s (or 300s on some plans)
+const STARTUP_TIMEOUT_MS = 25_000; // 503 before Vercel 60s so client can retry
 
-let dbConnected = false;
-let handler: (req: any, res: any) => Promise<any> | void;
+let handler: ((req: any, res: any) => Promise<any> | void) | null = null;
 
 function getPath(req: any): string {
   const raw = (req.url || req.path || req.originalUrl || '') as string;
@@ -47,24 +46,12 @@ async function getHandler(): Promise<(req: any, res: any) => Promise<any> | void
   return handler;
 }
 
-/** Lazy-load mongoose so /health never loads it. Connect with shorter timeouts for faster fail. */
-async function ensureDb(): Promise<void> {
-  if (dbConnected) return;
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    throw new Error('MONGODB_URI is not set. Add it in Vercel Environment Variables.');
-  }
-  const mongoose = (await import('mongoose')).default;
-  await mongoose.connect(uri, {
-    serverSelectionTimeoutMS: 8000,
-    connectTimeoutMS: 6000,
-  });
-  dbConnected = true;
-}
-
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('Startup timeout — cold start took too long. Please retry.')), ms);
+    const t = setTimeout(
+      () => reject(new Error('Startup timeout — cold start took too long. Please retry.')),
+      ms
+    );
     promise.then(
       (v) => {
         clearTimeout(t);
@@ -84,15 +71,33 @@ export default async function (req: any, res: any) {
     return;
   }
 
+  // Validate MONGODB_URI early so we fail fast with clear error instead of hanging
+  const uri = process.env.MONGODB_URI;
+  if (!uri || typeof uri !== 'string' || uri.trim() === '') {
+    console.error('[vercel] MONGODB_URI is missing. Set it in Vercel → Settings → Environment Variables.');
+    send503(res, 'MONGODB_URI is not set. Add it in Vercel Environment Variables.');
+    return;
+  }
+
   try {
-    // Run DB + app load in parallel; fail fast if cold start exceeds limit so client gets 503 and can retry
+    const tStart = Date.now();
+    console.log(`[vercel] request start ${getPath(req)} (before connect)`);
+    const { connectMongo } = await import('../src/lib/mongoServerless');
+    const connectPromise = connectMongo().then(() => {
+      console.log(`[vercel] after connect ${Date.now() - tStart}ms`);
+    });
+    const handlerPromise = getHandler().then((h) => {
+      console.log(`[vercel] handler ready ${Date.now() - tStart}ms`);
+      return h;
+    });
     const [, h] = await withTimeout(
-      Promise.all([ensureDb(), getHandler()]),
+      Promise.all([connectPromise, handlerPromise]),
       STARTUP_TIMEOUT_MS
     );
     await h(req, res);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Startup failed';
+    console.error('[vercel]', message);
     send503(res, message);
   }
 }

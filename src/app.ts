@@ -123,6 +123,18 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'DietTemple API is running' });
 });
+app.get('/health/db', async (req, res) => {
+  try {
+    const mongoose = (await import('mongoose')).default;
+    const start = Date.now();
+    await mongoose.connection.db?.admin().ping();
+    const ms = Date.now() - start;
+    res.json({ status: 'OK', db: 'connected', pingMs: ms });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Unknown error';
+    res.status(503).json({ status: 'error', db: 'disconnected', message });
+  }
+});
 
 app.use(errorLogger);
 
