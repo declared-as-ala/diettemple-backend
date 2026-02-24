@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import UserNutritionPlan from '../../models/UserNutritionPlan.model';
 import User from '../../models/User.model';
@@ -23,7 +23,7 @@ router.post(
     body('endAt').isISO8601(),
     body('overrides').optional().isObject(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { userId, nutritionPlanTemplateId, startAt, endAt, overrides } = req.body;
       const start = new Date(startAt);
@@ -70,7 +70,7 @@ router.get(
     query('status').optional().isIn(['ACTIVE', 'EXPIRED', 'PAUSED']),
     query('searchUser').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt((req.query.page as string) || '1');
       const limit = parseInt((req.query.limit as string) || '20');
@@ -113,7 +113,7 @@ router.get(
 router.get(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await UserNutritionPlan.findById(req.params.id)
         .populate('userId', 'name email')
@@ -140,7 +140,7 @@ router.patch(
     body('adjustments.fatG').optional().isNumeric(),
     body('adjustments.notes').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const err = validationResult(req);
       if (!err.isEmpty()) return res.status(400).json({ message: err.array()[0].msg });

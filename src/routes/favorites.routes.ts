@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import Favorite from '../models/Favorite.model';
@@ -10,7 +10,7 @@ const router = Router();
 router.use(authenticate);
 
 // GET /favorites - Get user's favorites
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const favorites = await Favorite.find({ userId: req.user._id })
       .populate('productId')
@@ -27,7 +27,7 @@ router.get('/', async (req: AuthRequest, res) => {
 router.post(
   '/',
   [body('productId').isMongoId().withMessage('Invalid product ID')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { productId } = req.body;
 
@@ -69,7 +69,7 @@ router.post(
 router.delete(
   '/:id',
   [param('id').isMongoId().withMessage('Invalid favorite ID')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const favorite = await Favorite.findOneAndDelete({
         _id: req.params.id,
@@ -91,7 +91,7 @@ router.delete(
 router.delete(
   '/product/:productId',
   [param('productId').isMongoId().withMessage('Invalid product ID')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const favorite = await Favorite.findOneAndDelete({
         productId: req.params.productId,
@@ -113,7 +113,7 @@ router.delete(
 router.get(
   '/check/:productId',
   [param('productId').isMongoId().withMessage('Invalid product ID')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const favorite = await Favorite.findOne({
         productId: req.params.productId,

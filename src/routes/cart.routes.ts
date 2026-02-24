@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import Cart from '../models/Cart.model';
@@ -11,7 +11,7 @@ const router = Router();
 router.use(authenticate);
 
 // GET /cart - Get user's cart with calculated totals
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     let cart = await Cart.findOne({ userId: req.user._id }).populate('items.productId');
 
@@ -43,7 +43,7 @@ router.post(
     body('productId').isMongoId().withMessage('Invalid product ID'),
     body('quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { productId, quantity } = req.body;
 
@@ -106,7 +106,7 @@ router.put(
     param('productId').isMongoId().withMessage('Invalid product ID'),
     body('quantity').isInt({ min: 0 }).withMessage('Quantity must be 0 or greater'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { productId } = req.params;
       const { quantity } = req.body;
@@ -165,7 +165,7 @@ router.put(
 router.delete(
   '/item/:productId',
   [param('productId').isMongoId().withMessage('Invalid product ID')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const cart = await Cart.findOne({ userId: req.user._id });
       if (!cart) {

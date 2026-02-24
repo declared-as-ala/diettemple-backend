@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param, query } from 'express-validator';
 import SessionTemplate from '../../models/SessionTemplate.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
@@ -14,7 +14,7 @@ router.get(
     query('search').optional().isString(),
     query('difficulty').optional().isIn(['beginner', 'intermediate', 'advanced']),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt((req.query.page as string) || '1');
       const limit = parseInt((req.query.limit as string) || '20');
@@ -46,7 +46,7 @@ router.get(
 router.get(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const sessionTemplate = await SessionTemplate.findById(req.params.id)
         .populate('items.exerciseId', 'name muscleGroup difficulty equipment')
@@ -72,7 +72,7 @@ router.post(
     body('items').optional().isArray(),
     body('tags').optional().isArray(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await SessionTemplate.create({
         title: req.body.title,
@@ -93,7 +93,7 @@ router.post(
 router.put(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await SessionTemplate.findById(req.params.id);
       if (!doc) {
@@ -117,7 +117,7 @@ router.put(
 router.delete(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await SessionTemplate.findByIdAndDelete(req.params.id);
       if (!doc) {

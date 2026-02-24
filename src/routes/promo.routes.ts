@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import PromoCode from '../models/PromoCode.model';
@@ -13,7 +13,7 @@ router.post(
     body('code').notEmpty().withMessage('Code promo requis'),
     body('subtotal').isFloat({ min: 0 }).withMessage('Sous-total invalide'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { code, subtotal } = req.body;
 

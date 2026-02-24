@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { query } from 'express-validator';
 import User from '../../models/User.model';
 import Subscription from '../../models/Subscription.model';
@@ -38,7 +38,7 @@ function getRangeDates(range: string): { start: Date; end: Date } {
 // GET /dashboard/stats
 router.get(
   '/stats',
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const range = (req.query.range as string) || '30d';
       const { start, end } = getRangeDates(range);
@@ -154,7 +154,7 @@ router.get(
 router.get(
   '/inactive',
   [query('days').optional().isInt({ min: 1, max: 90 })],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const days = parseInt((req.query.days as string) || '7');
       const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
@@ -194,7 +194,7 @@ router.get(
 router.get(
   '/charts',
   [query('range').optional().isIn(['7d', '30d', '90d', '12m'])],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const range = (req.query.range as string) || '30d';
       const { start, end } = getRangeDates(range);

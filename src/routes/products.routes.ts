@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { query, param } from 'express-validator';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import Product from '../models/Product.model';
@@ -19,7 +19,7 @@ router.get(
     query('maxPrice').optional().isFloat({ min: 0 }),
     query('inStock').optional().isBoolean(),
   ],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -111,7 +111,7 @@ router.get('/categories', async (req, res) => {
 router.get(
   '/:id',
   [param('id').isMongoId().withMessage('Invalid product ID')],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const product = await Product.findById(req.params.id).lean();
 

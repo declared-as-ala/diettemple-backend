@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param, query } from 'express-validator';
 import LevelTemplate from '../../models/LevelTemplate.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
@@ -42,7 +42,7 @@ router.get(
     query('search').optional().isString(),
     query('active').optional().isIn(['true', 'false']),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt((req.query.page as string) || '1');
       const limit = parseInt((req.query.limit as string) || '20');
@@ -75,7 +75,7 @@ router.get(
 router.get(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const levelTemplate = await LevelTemplate.findById(req.params.id).lean();
       if (!levelTemplate) {
@@ -97,7 +97,7 @@ router.post(
     body('imageUrl').optional().isString(),
     body('isActive').optional().isBoolean(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const plan = await LevelTemplate.create({
         name: req.body.name,
@@ -116,7 +116,7 @@ router.post(
 router.put(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const plan = await LevelTemplate.findById(req.params.id);
       if (!plan) {
@@ -138,7 +138,7 @@ router.put(
 router.put(
   '/:id/weeks',
   [param('id').isMongoId(), body('weeks').isArray().withMessage('weeks must be an array')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const validation = validateWeeks(req.body.weeks);
       if (!validation.valid) {
@@ -173,7 +173,7 @@ router.put(
 router.delete(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const plan = await LevelTemplate.findByIdAndDelete(req.params.id);
       if (!plan) {

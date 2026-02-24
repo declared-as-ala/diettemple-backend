@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import User from '../../models/User.model';
 import Subscription from '../../models/Subscription.model';
@@ -39,7 +39,7 @@ router.get(
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt((req.query.page as string) || '1');
       const limit = parseInt((req.query.limit as string) || '20');
@@ -139,7 +139,7 @@ router.post(
     body('phone').optional().isString(),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
@@ -177,7 +177,7 @@ router.post(
 router.get(
   '/:id/plan',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
       const sub = await Subscription.findOne({ userId, status: 'ACTIVE', endAt: { $gt: now } })
@@ -227,7 +227,7 @@ router.put(
     param('weekNumber').isInt({ min: 1, max: 5 }),
     body('days').isObject().withMessage('days required (mon..sun arrays)'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
@@ -285,7 +285,7 @@ router.put(
 router.post(
   '/:id/plan/reset-week/:weekNumber',
   [param('id').isMongoId(), param('weekNumber').isInt({ min: 1, max: 5 })],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
       const weekNumber = parseInt(req.params.weekNumber);
@@ -321,7 +321,7 @@ router.put(
     param('sessionTemplateId').isMongoId(),
     body('items').isArray().withMessage('items array required'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
@@ -357,7 +357,7 @@ router.put(
 router.get(
   '/:id/nutrition',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
       const assignment = await UserNutritionPlan.findOne({ userId })
@@ -384,7 +384,7 @@ router.post(
     body('message').notEmpty().trim(),
     body('title').optional().trim(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
@@ -417,7 +417,7 @@ router.post(
 router.get(
   '/:id/timeline',
   [param('id').isMongoId(), query('limit').optional().isInt({ min: 1, max: 100 })],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
       const limit = parseInt((req.query.limit as string) || '50');
@@ -460,7 +460,7 @@ router.get(
 router.get(
   '/:id/analytics',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
       const user = await User.findById(userId).lean();
@@ -521,7 +521,7 @@ router.post(
     body('startDate').isISO8601().withMessage('Start date is required'),
     body('durationWeeks').isInt({ min: 1 }).withMessage('Duration must be at least 1 week'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
@@ -569,7 +569,7 @@ router.post(
 router.get(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
       const [user, sub, nutritionAssignment, lastNote, lastWorkout] = await Promise.all([

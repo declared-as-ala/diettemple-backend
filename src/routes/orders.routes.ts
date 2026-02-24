@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { body, param } from 'express-validator';
 import jwt from 'jsonwebtoken';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
@@ -31,7 +31,7 @@ router.post(
     body('promoCode').optional().isString(),
     body('paymentMethod').isIn(['CASH_ON_DELIVERY', 'CLICKTOPAY']).withMessage('Méthode de paiement requise'),
   ],
-  async (req: any, res) => {
+  async (req: Request, res: Response) => {
     try {
       const { items: orderItems, deliveryAddress, promoCode, subtotal, discount = 0, paymentMethod } = req.body;
 
@@ -171,7 +171,7 @@ router.post(
 router.get(
   '/:id',
   [param('id').isMongoId().withMessage('Invalid order ID')],
-  async (req: any, res) => {
+  async (req: Request, res: Response) => {
     try {
       const orderId = req.params.id;
       
@@ -211,7 +211,7 @@ router.get(
 router.get(
   '/:id/pdf',
   [param('id').isMongoId().withMessage('Invalid order ID')],
-  async (req: any, res) => {
+  async (req: Request, res: Response) => {
     try {
       const orderId = req.params.id;
       
@@ -268,7 +268,7 @@ router.post(
     body('deliveryAddress').optional().isObject(),
     body('paymentMethod').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { deliveryAddress, paymentMethod } = req.body;
 
@@ -341,7 +341,7 @@ router.post(
 );
 
 // GET /orders - Get user's orders
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const orders = await Order.find({ userId: req.user._id })
       .sort({ createdAt: -1 })

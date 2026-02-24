@@ -1,11 +1,11 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { body, param } from 'express-validator';
 import NutritionPlanTemplate from '../../models/NutritionPlanTemplate.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
 
 const router = Router();
 
-router.get('/', async (_req: AuthRequest, res) => {
+router.get('/', async (_req: AuthRequest, res: Response) => {
   try {
     const list = await NutritionPlanTemplate.find().sort({ name: 1 }).lean();
     res.json({ nutritionPlanTemplates: list });
@@ -17,7 +17,7 @@ router.get('/', async (_req: AuthRequest, res) => {
 router.get(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await NutritionPlanTemplate.findById(req.params.id).lean();
       if (!doc) return res.status(404).json({ message: 'Nutrition plan not found' });
@@ -40,7 +40,7 @@ router.post(
     body('macros.fatG').isNumeric(),
     body('mealsTemplate').optional().isArray(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await NutritionPlanTemplate.create({
         name: req.body.name,
@@ -60,7 +60,7 @@ router.post(
 router.put(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await NutritionPlanTemplate.findByIdAndUpdate(
         req.params.id,
@@ -87,7 +87,7 @@ router.put(
 router.delete(
   '/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const doc = await NutritionPlanTemplate.findByIdAndDelete(req.params.id);
       if (!doc) return res.status(404).json({ message: 'Nutrition plan not found' });

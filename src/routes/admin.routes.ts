@@ -112,7 +112,7 @@ router.get(
     query('search').optional().isString(),
     query('category').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -156,7 +156,7 @@ router.get(
 router.get(
   '/products/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const product = await Product.findById(req.params.id).lean();
       if (!product) {
@@ -181,7 +181,7 @@ router.post(
     body('stock').isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
     body('weight').notEmpty().withMessage('Weight is required'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const {
         name,
@@ -235,7 +235,7 @@ router.put(
     body('price').optional().isFloat({ min: 0 }),
     body('stock').optional().isInt({ min: 0 }),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const product = await Product.findById(req.params.id);
       if (!product) {
@@ -257,7 +257,7 @@ router.put(
 router.delete(
   '/products/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const product = await Product.findById(req.params.id);
       if (!product) {
@@ -280,7 +280,7 @@ router.delete(
 router.post(
   '/products/:id/images',
   [param('id').isMongoId(), body('images').isArray().withMessage('Images must be an array')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const product = await Product.findById(req.params.id);
       if (!product) {
@@ -303,7 +303,7 @@ router.post(
 );
 
 // GET /admin/products/categories - Get all categories
-router.get('/products/categories', async (req: AuthRequest, res) => {
+router.get('/products/categories', async (req: AuthRequest, res: Response) => {
   try {
     const categories = await Product.distinct('category');
     res.json({ categories });
@@ -323,7 +323,7 @@ router.get(
     query('status').optional().isString(),
     query('paymentStatus').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -365,7 +365,7 @@ router.get(
 router.get(
   '/orders/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const order = await Order.findById(req.params.id)
         .populate('userId', 'name email phone level')
@@ -391,7 +391,7 @@ router.put(
       .isIn(['pending', 'pending_payment', 'paid', 'failed', 'confirmed', 'preparing', 'shipped', 'delivered', 'cancelled'])
       .withMessage('Invalid status'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const order = await Order.findById(req.params.id);
       if (!order) {
@@ -423,7 +423,7 @@ router.put(
       .isIn(['PENDING', 'PAID', 'FAILED'])
       .withMessage('Invalid payment status'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const order = await Order.findById(req.params.id);
       if (!order) {
@@ -450,7 +450,7 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('search').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -646,7 +646,7 @@ router.get(
 router.get(
   '/users/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const user = await User.findById(req.params.id)
         .select('-passwordHash -otp -otpExpires')
@@ -676,7 +676,7 @@ router.get(
 router.put(
   '/users/:id/disable',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const user = await User.findById(req.params.id);
       if (!user) {
@@ -702,7 +702,7 @@ router.post(
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     body('level').optional().isIn(['Intiate', 'Fighter', 'Warrior', 'Champion', 'Elite']),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -747,7 +747,7 @@ router.put(
     body('level').optional().isIn(['Intiate', 'Fighter', 'Warrior', 'Champion', 'Elite']),
     body('password').optional().isLength({ min: 6 }),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -780,7 +780,7 @@ router.put(
 router.delete(
   '/users/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const user = await User.findByIdAndDelete(req.params.id);
       if (!user) {
@@ -803,7 +803,7 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('status').optional().isIn(['ACTIVE', 'COMPLETED', 'PAUSED']),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -843,7 +843,7 @@ router.get(
 router.get(
   '/programs/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const program = await Program.findById(req.params.id)
         .populate('userId', 'name email photoUri level xp')
@@ -865,7 +865,7 @@ router.get(
 router.put(
   '/programs/:id/status',
   [param('id').isMongoId(), body('status').isIn(['ACTIVE', 'COMPLETED', 'PAUSED'])],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const program = await Program.findById(req.params.id);
       if (!program) {
@@ -984,7 +984,7 @@ router.get(
     query('status').optional().isIn(['active', 'completed', 'abandoned']),
     query('userId').optional().isMongoId(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -1027,7 +1027,7 @@ router.get(
 router.get(
   '/workouts/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const workout = await WorkoutSession.findById(req.params.id)
         .populate('userId', 'name email photoUri level')
@@ -1060,7 +1060,7 @@ router.get(
     query('equipment').optional().isString(),
     query('hasVideo').optional().isIn(['true', 'false']),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 50;
@@ -1115,7 +1115,7 @@ router.get(
 
 // GET /admin/exercises/muscle-groups - Get all muscle groups
 // NOTE: This must come before /exercises/:id to avoid route conflicts
-router.get('/exercises/muscle-groups', async (req: AuthRequest, res) => {
+router.get('/exercises/muscle-groups', async (req: AuthRequest, res: Response) => {
   try {
     const muscleGroups = await Exercise.distinct('muscleGroup');
     res.json({ muscleGroups });
@@ -1128,7 +1128,7 @@ router.get('/exercises/muscle-groups', async (req: AuthRequest, res) => {
 router.get(
   '/exercises/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const exercise = await Exercise.findById(req.params.id).lean();
       if (!exercise) {
@@ -1148,7 +1148,7 @@ router.post(
     body('name').notEmpty().withMessage('Name is required'),
     body('muscleGroup').notEmpty().withMessage('Muscle group is required'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const exercise = new Exercise(req.body);
       await exercise.save();
@@ -1163,7 +1163,7 @@ router.post(
 router.put(
   '/exercises/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const exercise = await Exercise.findById(req.params.id);
       if (!exercise) {
@@ -1185,7 +1185,7 @@ router.post(
   '/exercises/:id/video',
   [param('id').isMongoId()],
   upload.single('video'),
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const exercise = await Exercise.findById(req.params.id);
       if (!exercise) {
@@ -1253,7 +1253,7 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('search').optional().isString(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -1296,7 +1296,7 @@ router.get(
 router.get(
   '/sessions/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const session = await Session.findById(req.params.id)
         .populate('exercises')
@@ -1327,7 +1327,7 @@ router.post(
     body('title').notEmpty().withMessage('Title is required'),
     body('exerciseConfigs').optional().isArray(),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { title, description, duration, difficulty, exerciseConfigs } = req.body;
 
@@ -1372,7 +1372,7 @@ router.post(
 router.put(
   '/sessions/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const session = await Session.findById(req.params.id);
       if (!session) {
@@ -1421,7 +1421,7 @@ router.put(
 router.delete(
   '/sessions/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const session = await Session.findById(req.params.id);
       if (!session) {
@@ -1451,7 +1451,7 @@ router.get(
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 20;
@@ -1485,7 +1485,7 @@ router.get(
 router.post(
   '/weekly-templates',
   [body('name').notEmpty().withMessage('Name is required')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const template = new WeeklyTemplate(req.body);
       await template.save();
@@ -1505,7 +1505,7 @@ router.post(
 router.put(
   '/weekly-templates/:id',
   [param('id').isMongoId()],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const template = await WeeklyTemplate.findById(req.params.id);
       if (!template) {

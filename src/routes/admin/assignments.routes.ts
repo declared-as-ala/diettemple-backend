@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { query } from 'express-validator';
 import Subscription from '../../models/Subscription.model';
 import User from '../../models/User.model';
@@ -33,7 +33,7 @@ router.get(
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const page = parseInt((req.query.page as string) || '1');
       const limit = parseInt((req.query.limit as string) || '50');
@@ -79,7 +79,7 @@ router.get(
           const sub = activeSub || latestSub;
           const effective = sub ? effectiveStatus(sub) : 'NONE';
           if (statusFilter && effective !== statusFilter) return null;
-          const levelName = sub?.levelTemplateId?.name;
+          const levelName = (sub?.levelTemplateId as { name?: string } | undefined)?.name;
           const levelId = sub?.levelTemplateId?._id?.toString();
           const endAt = sub?.endAt;
           const dr = endAt != null ? daysRemaining(endAt) : null;

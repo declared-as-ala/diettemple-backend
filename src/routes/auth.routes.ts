@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
 import { authService } from '../services/auth.service';
@@ -16,7 +16,7 @@ router.post(
     body('emailOrPhone').notEmpty().withMessage('Email or phone is required'),
     body('password').notEmpty().withMessage('Password is required'),
   ],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -35,7 +35,7 @@ router.post(
 router.post(
   '/forgot-password',
   [body('emailOrPhone').notEmpty().withMessage('Email or phone is required')],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -57,7 +57,7 @@ router.post(
     body('emailOrPhone').notEmpty().withMessage('Email or phone is required'),
     body('otp').isLength({ min: 4, max: 4 }).withMessage('OTP must be 4 digits'),
   ],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -86,7 +86,7 @@ router.post(
       return true;
     }),
   ],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -118,7 +118,7 @@ router.post(
   [
     body('biometricType').isIn(['fingerprint', 'faceid']).withMessage('Invalid biometric type'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -150,7 +150,7 @@ router.post(
   [
     body('emailOrPhone').notEmpty().withMessage('Email or phone is required'),
   ],
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -169,7 +169,7 @@ router.post(
 router.put(
   '/profile',
   authenticate,
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const { name, photoUri, age, sexe, poids, taille, objectif, xp } = req.body;
       
@@ -207,7 +207,7 @@ router.put(
 router.get(
   '/profile',
   authenticate,
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const user = await User.findById(req.user._id).select('-passwordHash -otp -otpExpires');
       if (!user) {
@@ -234,7 +234,7 @@ router.post(
       return true;
     }),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -270,7 +270,7 @@ router.post(
   '/upload-image',
   authenticate,
   [body('image').notEmpty().withMessage('Image is required')],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
