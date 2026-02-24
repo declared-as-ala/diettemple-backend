@@ -17,14 +17,14 @@ function getPath(req: any): string {
 function isQuickPath(req: any): boolean {
   if (req.method !== 'GET') return false;
   const path = getPath(req);
-  return path === '/' || path === '/health' || path === '/favicon.ico';
+  return path === '/' || path === '/api' || path === '/health' || path === '/favicon.ico';
 }
 
 function sendQuickResponse(res: any, path: string): void {
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
   const body =
-    path === '/health'
+    path === '/health' || path === '/api'
       ? JSON.stringify({ status: 'OK', message: 'DietTemple API is running' })
       : JSON.stringify({ status: 'ok', message: 'DietTemple API', health: '/health' });
   res.setHeader('Content-Length', Buffer.byteLength(body));
