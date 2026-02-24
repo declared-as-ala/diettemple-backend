@@ -61,7 +61,6 @@ const ExerciseHistorySchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Exercise',
       required: true,
-      index: true,
     },
     lastWeight: {
       type: Number,

@@ -1,8 +1,9 @@
 /**
  * Vercel serverless entry. Root /health /favicon.ico respond immediately
- * without loading Express or MongoDB to avoid 300s timeout.
+ * without loading Express or MongoDB. Other routes: init DB + app in parallel;
+ * if init takes too long (cold start), return 503 so client can retry instead of 300s timeout.
  */
-import mongoose from 'mongoose';
+const STARTUP_TIMEOUT_MS = 55_000; // Return 503 before Vercel kills at 60s (or 300s on some plans)
 
 let dbConnected = false;
 let handler: (req: any, res: any) => Promise<any> | void;
@@ -30,6 +31,14 @@ function sendQuickResponse(res: any, path: string): void {
   res.end(body);
 }
 
+function send503(res: any, message: string): void {
+  res.statusCode = 503;
+  res.setHeader('Content-Type', 'application/json');
+  const body = JSON.stringify({ error: 'Service temporarily unavailable', message, retry: true });
+  res.setHeader('Content-Length', Buffer.byteLength(body));
+  res.end(body);
+}
+
 async function getHandler(): Promise<(req: any, res: any) => Promise<any> | void> {
   if (handler) return handler;
   const serverless = (await import('serverless-http')).default;
@@ -38,17 +47,35 @@ async function getHandler(): Promise<(req: any, res: any) => Promise<any> | void
   return handler;
 }
 
+/** Lazy-load mongoose so /health never loads it. Connect with shorter timeouts for faster fail. */
 async function ensureDb(): Promise<void> {
   if (dbConnected) return;
   const uri = process.env.MONGODB_URI;
   if (!uri) {
     throw new Error('MONGODB_URI is not set. Add it in Vercel Environment Variables.');
   }
+  const mongoose = (await import('mongoose')).default;
   await mongoose.connect(uri, {
-    serverSelectionTimeoutMS: 10000,
-    connectTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 8000,
+    connectTimeoutMS: 6000,
   });
   dbConnected = true;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('Startup timeout — cold start took too long. Please retry.')), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
 }
 
 export default async function (req: any, res: any) {
@@ -56,7 +83,16 @@ export default async function (req: any, res: any) {
     sendQuickResponse(res, getPath(req));
     return;
   }
-  await ensureDb();
-  const h = await getHandler();
-  return h(req, res);
+
+  try {
+    // Run DB + app load in parallel; fail fast if cold start exceeds limit so client gets 503 and can retry
+    const [, h] = await withTimeout(
+      Promise.all([ensureDb(), getHandler()]),
+      STARTUP_TIMEOUT_MS
+    );
+    await h(req, res);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Startup failed';
+    send503(res, message);
+  }
 }

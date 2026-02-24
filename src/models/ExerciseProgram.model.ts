@@ -17,7 +17,6 @@ const ExerciseProgramSchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Exercise',
       required: true,
-      index: true,
     },
     targetSets: {
       type: Number,
