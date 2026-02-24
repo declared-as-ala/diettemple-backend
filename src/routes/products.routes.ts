@@ -65,7 +65,7 @@ router.get(
       });
       console.log(`[products list] query=${t2 - t1}ms total=${t2 - t0}ms`);
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ error: 'error', message: error.message });
     }
   }
 );
@@ -85,17 +85,17 @@ router.get('/featured', async (req: Request, res: Response) => {
     res.json({ products });
     console.log(`[products featured] query=${t2 - t1}ms total=${t2 - t0}ms`);
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ error: 'error', message: error.message });
   }
 });
 
 // GET /products/categories - Get all categories
 router.get('/categories', async (req: Request, res: Response) => {
   try {
-    const categories = await Product.distinct('category');
+    const categories = await Product.distinct('category').maxTimeMS(QUERY_TIMEOUT_MS);
     res.json({ categories });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ error: 'error', message: error.message });
   }
 });
 
@@ -105,7 +105,7 @@ router.get(
   [param('id').isMongoId().withMessage('Invalid product ID')],
   async (req: Request, res: Response) => {
     try {
-      const product = await Product.findById(req.params.id).lean();
+      const product = await Product.findById(req.params.id).maxTimeMS(QUERY_TIMEOUT_MS).lean();
 
       if (!product) {
         return res.status(404).json({ message: 'Product not found' });
@@ -113,7 +113,7 @@ router.get(
 
       res.json({ product });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ error: 'error', message: error.message });
     }
   }
 );
@@ -126,9 +126,8 @@ router.get('/search/suggestions', async (req: Request, res: Response) => {
       return res.json({ suggestions: [] });
     }
 
-    const products = await Product.find({
-      $text: { $search: searchTerm },
-    })
+    const products = await Product.find({ $text: { $search: searchTerm } })
+      .maxTimeMS(QUERY_TIMEOUT_MS)
       .select('name category')
       .limit(10)
       .lean();
@@ -136,7 +135,7 @@ router.get('/search/suggestions', async (req: Request, res: Response) => {
     const suggestions = products.map((p) => p.name);
     res.json({ suggestions });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ error: 'error', message: error.message });
   }
 });
 

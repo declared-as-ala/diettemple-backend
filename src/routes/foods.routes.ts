@@ -39,7 +39,7 @@ router.get(
         })),
       });
     } catch (e: unknown) {
-      res.status(500).json({ message: (e as Error).message });
+      res.status(500).json({ error: 'error', message: (e as Error).message });
     }
   }
 );

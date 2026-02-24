@@ -87,7 +87,7 @@ export default async function (req: any, res: any) {
 
   try {
     const tStart = Date.now();
-    console.log(`[vercel] request start ${getPath(req)} (before connect)`);
+    console.log(`[vercel] request start ${req.method} ${getPath(req)} (before connect)`);
     const { connectMongo } = await import('../src/lib/mongoServerless');
     const connectPromise = connectMongo().then(() => {
       console.log(`[vercel] after connect ${Date.now() - tStart}ms`);

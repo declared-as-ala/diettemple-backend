@@ -32,6 +32,7 @@ import foodsRoutes from './routes/foods.routes';
 import { authenticate } from './middleware/auth.middleware';
 import { requireAdmin } from './middleware/admin.middleware';
 import { requestLogger, errorLogger } from './middleware/logger.middleware';
+import { requestTimeoutMiddleware } from './middleware/requestTimeout.middleware';
 import { getStoragePublicRoot } from './lib/mediaStorage';
 
 if (!process.env.JWT_SECRET) {
@@ -44,8 +45,11 @@ if (process.env.JWT_SECRET.length < 32) {
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Fail fast before platform 504 (Vercel maxDuration)
+app.use(requestTimeoutMiddleware);
 
 // Storage: public media served at /media
 try {

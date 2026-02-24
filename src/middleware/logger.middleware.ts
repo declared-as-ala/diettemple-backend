@@ -46,7 +46,7 @@ export const requestLogger = (
 
   const clientIp = getClientIp(req);
 
-  // Log request
+  // Log request (lightweight for diagnostics)
   const requestLog: RequestLog = {
     timestamp,
     method: req.method,
@@ -78,7 +78,7 @@ export const requestLogger = (
   // Log request
   console.log('📥 [REQUEST]', JSON.stringify(requestLog, null, 2));
 
-  // Log response when finished
+  // Log response when finished (duration in ms for timeout diagnostics)
   res.on('finish', () => {
     const responseTime = Date.now() - startTime;
     const responseLog: ResponseLog = {
@@ -89,6 +89,9 @@ export const requestLogger = (
       responseTime,
       ip: clientIp,
     };
+    if (responseTime > 5000) {
+      console.warn(`[slow] ${req.method} ${req.path} ${responseTime}ms`);
+    }
 
     // Color code by status
     if (res.statusCode >= 500) {
@@ -192,9 +195,12 @@ export const errorLogger = (
   
   console.error('🔥 [ERROR] ==========================================');
 
-  // Send error response if not already sent
+  // Always send a response so the request never hangs (avoids 504)
   if (!res.headersSent) {
-    res.status(error?.statusCode || 500).json({
+    const status = error?.statusCode || 500;
+    const code = error?.code ?? error?.name ?? 'error';
+    res.status(status).json({
+      error: code,
       message: error?.message || 'Internal server error',
       ...(process.env.NODE_ENV === 'development' && { stack: error?.stack }),
     });

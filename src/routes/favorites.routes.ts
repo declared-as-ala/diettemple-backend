@@ -6,20 +6,25 @@ import Product from '../models/Product.model';
 
 const router = Router();
 
+const QUERY_TIMEOUT_MS = 10_000;
+const MAX_FAVORITES_LIST = 100;
+
 // All routes require authentication
 router.use(authenticate);
 
-// GET /favorites - Get user's favorites
+// GET /favorites - Get user's favorites (paginated, bounded)
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const favorites = await Favorite.find({ userId: req.user._id })
-      .populate('productId')
+      .maxTimeMS(QUERY_TIMEOUT_MS)
+      .populate('productId', 'name brand category price discount images stock isFeatured')
       .sort({ createdAt: -1 })
+      .limit(MAX_FAVORITES_LIST)
       .lean();
 
     res.json({ favorites });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ error: 'error', message: error.message });
   }
 });
 

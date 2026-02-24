@@ -340,16 +340,22 @@ router.post(
   }
 );
 
-// GET /orders - Get user's orders
+const ORDERS_QUERY_TIMEOUT_MS = 10_000;
+const MAX_ORDERS_LIST = 100;
+
+// GET /orders - Get user's orders (bounded, with timeout)
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
+    const limit = Math.min(parseInt((req.query.limit as string) || '50', 10) || 50, MAX_ORDERS_LIST);
     const orders = await Order.find({ userId: req.user._id })
+      .maxTimeMS(ORDERS_QUERY_TIMEOUT_MS)
       .sort({ createdAt: -1 })
+      .limit(limit)
       .lean();
 
     res.json({ orders });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ error: 'error', message: error.message });
   }
 });
 

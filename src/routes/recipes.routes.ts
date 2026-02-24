@@ -3,10 +3,18 @@ import Recipe from '../models/Recipe.model';
 
 const router = Router();
 
-// GET /api/recipes — list all recipes (public or auth)
-router.get('/', async (_req, res) => {
+const QUERY_TIMEOUT_MS = 10_000;
+const MAX_RECIPES_LIST = 100;
+
+// GET /api/recipes — list all recipes (public or auth), paginated
+router.get('/', async (req, res) => {
   try {
-    const recipes = await Recipe.find().lean().sort({ createdAt: -1 });
+    const limit = Math.min(parseInt((req.query.limit as string) || '50', 10) || 50, MAX_RECIPES_LIST);
+    const recipes = await Recipe.find()
+      .maxTimeMS(QUERY_TIMEOUT_MS)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
     res.json({
       recipes: recipes.map((r: any) => ({
         _id: r._id.toString(),
@@ -24,7 +32,7 @@ router.get('/', async (_req, res) => {
       })),
     });
   } catch (e: unknown) {
-    res.status(500).json({ message: (e as Error).message });
+    res.status(500).json({ error: 'error', message: (e as Error).message });
   }
 });
 
