@@ -12,9 +12,22 @@ Root `/` and `/health` still rewrite to `/api` and are answered by `api/index.ts
 ## Serverless behavior (no 504)
 
 - **Handlers** use `src/app.ts` only (never `src/index.ts` or `app.listen`).
-- **MongoDB** is connected via `src/lib/mongoServerless.ts`: one cached connection per invocation, fast-fail timeouts (`serverSelectionTimeoutMS: 5000`, `socketTimeoutMS: 10000`). If the DB is slow or missing, the handler returns **503** (with `retry: true`) instead of hanging 60s.
+- **MongoDB** is connected via `src/lib/mongoServerless.ts`: one cached connection per invocation, fast-fail timeouts (connect under 15s, `bufferCommands: false`, `maxPoolSize: 2`). If the DB is slow or missing, the handler returns **503** (with `retry: true`) instead of 504.
 - **Health**: `GET /health` returns immediately (no DB). `GET /health/db` (through Express) returns DB ping status after the app has loaded.
 - **MONGODB_URI**: If missing or invalid, the handler logs clearly and returns 503 so you can fix env in Vercel → Settings → Environment Variables.
+
+## MongoDB Atlas (fix 504 gateway timeout)
+
+If you see **504** or "MongoDB Atlas connection timed out" from Vercel:
+
+1. **Network Access**  
+   Vercel uses **dynamic IPs**. In [MongoDB Atlas](https://cloud.mongodb.com) → your project → **Network Access** → **Add IP Address** → choose **Allow Access from Anywhere** (adds `0.0.0.0/0`). Without this, Atlas rejects connections from Vercel and the function can hang until 504.
+
+2. **Connection string**  
+   In Vercel → **Settings** → **Environment Variables**, set `MONGODB_URI` to your Atlas URI (e.g. `mongodb+srv://user:pass@cluster.mongodb.net/dbname`). The code adds `retryWrites=true` and `retryReads=true` if missing.
+
+3. **Region**  
+   For lower latency, use a Vercel region close to your Atlas cluster (e.g. same continent).
 
 ## Fix: "Missing public directory" / "Missing build script"
 

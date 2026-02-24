@@ -136,6 +136,9 @@ app.get('/health/db', async (req, res) => {
   }
 });
 
+app.use((_req, res) => {
+  res.status(404).json({ message: 'Not found', path: _req.path });
+});
 app.use(errorLogger);
 
 export default app;

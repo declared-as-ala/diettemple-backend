@@ -101,23 +101,20 @@ export default async function (req: any, res: any) {
       STARTUP_TIMEOUT_MS
     );
 
-    // If Express never sends a response (e.g. route hangs, middleware doesn't call next),
-    // we must respond before Vercel kills us at 60s — otherwise you get FUNCTION_INVOCATION_TIMEOUT (504).
-    let responded = false;
-    const originalEnd = res.end;
-    res.end = function (this: any, ...args: any[]) {
-      responded = true;
-      return originalEnd.apply(this, args);
-    };
-    const responseTimeout = setTimeout(() => {
-      if (responded) return;
-      console.error(`[vercel] response timeout after ${RESPONSE_TIMEOUT_MS}ms for ${getPath(req)}`);
-      if (!res.headersSent) send503(res, 'Response timeout. Please retry.');
-    }, RESPONSE_TIMEOUT_MS);
-    res.once('finish', () => clearTimeout(responseTimeout));
-    res.once('close', () => clearTimeout(responseTimeout));
-
-    await h(req, res);
+    const path = getPath(req);
+    const handlerPromise2 = h(req, res);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error(`Response timeout after ${RESPONSE_TIMEOUT_MS}ms for ${path}`)),
+        RESPONSE_TIMEOUT_MS
+      );
+    });
+    await Promise.race([handlerPromise2, timeoutPromise]).catch((err) => {
+      if (!res.headersSent) {
+        console.error('[vercel]', err instanceof Error ? err.message : err);
+        send503(res, 'Response timeout. Please retry.');
+      }
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Startup failed';
     console.error('[vercel]', message);

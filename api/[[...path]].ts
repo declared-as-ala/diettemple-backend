@@ -5,14 +5,18 @@
  */
 import handler from './index';
 
-export default function (req: any, res: any) {
-  const pathSegments = req.query?.path;
-  if (Array.isArray(pathSegments) && pathSegments.length > 0) {
+export default async function (req: any, res: any) {
+  const rawPath = req.query?.path;
+  const pathSegments = Array.isArray(rawPath) ? rawPath : (rawPath != null ? [String(rawPath)] : []);
+  if (pathSegments.length > 0) {
     const pathname = '/api/' + pathSegments.join('/');
-    const query = (req.url && String(req.url).includes('?')) ? String(req.url).substring(String(req.url).indexOf('?')) : '';
-    req.url = pathname + query;
+    const qs = (req.url && String(req.url).includes('?')) ? String(req.url).substring(String(req.url).indexOf('?')) : '';
+    req.url = pathname + qs;
     req.path = pathname;
-    if (req.originalUrl == null) req.originalUrl = pathname + query;
+    if (req.originalUrl == null) req.originalUrl = pathname + qs;
+  } else if (req.url && String(req.url).startsWith('/api/')) {
+    req.path = String(req.url).split('?')[0];
+    if (req.originalUrl == null) req.originalUrl = req.url;
   }
   return handler(req, res);
 }
