@@ -9,6 +9,13 @@ Requests to `/api/products`, `/api/orders`, etc. must reach Express with the cor
 
 Root `/` and `/health` still rewrite to `/api` and are answered by `api/index.ts` without loading Express.
 
+## Serverless behavior (no 504)
+
+- **Handlers** use `src/app.ts` only (never `src/index.ts` or `app.listen`).
+- **MongoDB** is connected via `src/lib/mongoServerless.ts`: one cached connection per invocation, fast-fail timeouts (`serverSelectionTimeoutMS: 5000`, `socketTimeoutMS: 10000`). If the DB is slow or missing, the handler returns **503** (with `retry: true`) instead of hanging 60s.
+- **Health**: `GET /health` returns immediately (no DB). `GET /health/db` (through Express) returns DB ping status after the app has loaded.
+- **MONGODB_URI**: If missing or invalid, the handler logs clearly and returns 503 so you can fix env in Vercel → Settings → Environment Variables.
+
 ## Fix: "Missing public directory" / "Missing build script"
 
 This project is **API-only** (serverless functions in `api/`). Vercel must not expect a frontend build or a `public` folder.

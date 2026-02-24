@@ -3,7 +3,13 @@
  * /health and /favicon.ico respond without loading Express or MongoDB.
  * Other routes: cached Mongo + Express in parallel; fast-fail 503 if init or DB times out.
  */
-const STARTUP_TIMEOUT_MS = 25_000; // 503 before Vercel 60s so client can retry
+
+/** Must be less than Vercel maxDuration so we return 503 instead of 504. See vercel.json functions[].maxDuration. */
+const STARTUP_TIMEOUT_MS = 25_000;
+/** If Express hasn't sent a response by this time, we send 503 and stop waiting (avoids FUNCTION_INVOCATION_TIMEOUT). */
+const RESPONSE_TIMEOUT_MS = 55_000;
+
+export const config = { maxDuration: 60 };
 
 let handler: ((req: any, res: any) => Promise<any> | void) | null = null;
 
@@ -94,6 +100,23 @@ export default async function (req: any, res: any) {
       Promise.all([connectPromise, handlerPromise]),
       STARTUP_TIMEOUT_MS
     );
+
+    // If Express never sends a response (e.g. route hangs, middleware doesn't call next),
+    // we must respond before Vercel kills us at 60s — otherwise you get FUNCTION_INVOCATION_TIMEOUT (504).
+    let responded = false;
+    const originalEnd = res.end;
+    res.end = function (this: any, ...args: any[]) {
+      responded = true;
+      return originalEnd.apply(this, args);
+    };
+    const responseTimeout = setTimeout(() => {
+      if (responded) return;
+      console.error(`[vercel] response timeout after ${RESPONSE_TIMEOUT_MS}ms for ${getPath(req)}`);
+      if (!res.headersSent) send503(res, 'Response timeout. Please retry.');
+    }, RESPONSE_TIMEOUT_MS);
+    res.once('finish', () => clearTimeout(responseTimeout));
+    res.once('close', () => clearTimeout(responseTimeout));
+
     await h(req, res);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Startup failed';
