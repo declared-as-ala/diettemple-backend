@@ -4,8 +4,8 @@
  * Other routes: cached Mongo + Express in parallel; fast-fail 503 if init or DB times out.
  */
 
-/** Must be less than Vercel maxDuration so we return 503 instead of 504. See vercel.json functions[].maxDuration. */
-const STARTUP_TIMEOUT_MS = 25_000;
+/** Must be less than Vercel maxDuration so we return 503 instead of 504. DB connect has its own 15s cap. */
+const STARTUP_TIMEOUT_MS = 20_000;
 /** If Express hasn't sent a response by this time, we send 503 and stop waiting (avoids FUNCTION_INVOCATION_TIMEOUT). */
 const RESPONSE_TIMEOUT_MS = 55_000;
 

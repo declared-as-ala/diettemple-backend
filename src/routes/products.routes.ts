@@ -11,6 +11,8 @@ const LIST_SELECT = 'name brand category price discount images stock isFeatured 
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 24;
+/** Abort MongoDB queries after this (avoids 504 on slow Atlas). */
+const QUERY_TIMEOUT_MS = 10_000;
 
 // GET /products - Get all products with filters and pagination
 router.get(
@@ -52,8 +54,8 @@ router.get(
 
       const t1 = Date.now();
       const [products, total] = await Promise.all([
-        Product.find(filter).select(LIST_SELECT).sort(sort).skip(skip).limit(limit).lean(),
-        Product.countDocuments(filter),
+        Product.find(filter).maxTimeMS(QUERY_TIMEOUT_MS).select(LIST_SELECT).sort(sort).skip(skip).limit(limit).lean(),
+        Product.countDocuments(filter).maxTimeMS(QUERY_TIMEOUT_MS),
       ]);
       const t2 = Date.now();
 
@@ -74,6 +76,7 @@ router.get('/featured', async (req: Request, res: Response) => {
   try {
     const t1 = Date.now();
     const products = await Product.find({ isFeatured: true, stock: { $gt: 0 } })
+      .maxTimeMS(QUERY_TIMEOUT_MS)
       .select(LIST_SELECT)
       .sort({ createdAt: -1 })
       .limit(10)
