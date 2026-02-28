@@ -1180,6 +1180,39 @@ router.put(
   }
 );
 
+// DELETE /admin/exercises/:id - Delete exercise
+router.delete(
+  '/exercises/:id',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const exercise = await Exercise.findById(req.params.id);
+      if (!exercise) {
+        return res.status(404).json({ message: 'Exercise not found' });
+      }
+      // Delete uploaded video file if exists
+      if (exercise.videoSource === 'upload' && exercise.videoUrl) {
+        if (exercise.videoUrl.startsWith('/media/')) {
+          const oldPath = publicUrlToFsPath(exercise.videoUrl);
+          if (oldPath && fs.existsSync(oldPath)) {
+            try { fs.unlinkSync(oldPath); } catch (_) {}
+          }
+        } else if (exercise.videoUrl.startsWith('/api/videos/')) {
+          const oldFileName = exercise.videoUrl.replace(/^\/api\/videos\//, '');
+          const oldPath = path.join(legacyVideoDir, oldFileName);
+          if (fs.existsSync(oldPath)) {
+            try { fs.unlinkSync(oldPath); } catch (_) {}
+          }
+        }
+      }
+      await Exercise.findByIdAndDelete(req.params.id);
+      res.json({ message: 'Exercise deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
 // POST /admin/exercises/:id/video - Update exercise video (file upload)
 router.post(
   '/exercises/:id/video',
