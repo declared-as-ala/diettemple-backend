@@ -11,7 +11,7 @@ const router = Router();
 router.use(authenticate);
 
 // GET /cart - Get user's cart with calculated totals
-router.get('/', async (req: AuthRequest, res: Response) => {
+router.get('/', async (req: AuthRequest, res) => {
   try {
     let cart = await Cart.findOne({ userId: req.user._id }).populate('items.productId');
 

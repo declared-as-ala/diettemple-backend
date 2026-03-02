@@ -19,6 +19,8 @@ const CONNECT_TIMEOUT_MS = numEnv('MONGODB_CONNECT_TIMEOUT_MS', 5_000);
 const SOCKET_TIMEOUT_MS = numEnv('MONGODB_SOCKET_TIMEOUT_MS', 10_000);
 const MAX_POOL_SIZE = numEnv('MONGODB_MAX_POOL_SIZE', 10);
 const MAX_IDLE_TIME_MS = numEnv('MONGODB_MAX_IDLE_TIME_MS', 60_000);
+/** Max wait for a socket from the pool (fail fast under load). */
+const WAIT_QUEUE_TIMEOUT_MS = numEnv('MONGODB_WAIT_QUEUE_TIMEOUT_MS', 2_000);
 /** Hard cap on connect so we 503 before Vercel 504. */
 const CONNECT_TOTAL_TIMEOUT_MS = numEnv('MONGODB_CONNECT_TOTAL_TIMEOUT_MS', 15_000);
 
@@ -68,6 +70,7 @@ export async function connectMongo(): Promise<void> {
     socketTimeoutMS: SOCKET_TIMEOUT_MS,
     maxPoolSize: MAX_POOL_SIZE,
     maxIdleTimeMS: MAX_IDLE_TIME_MS,
+    waitQueueTimeoutMS: WAIT_QUEUE_TIMEOUT_MS,
   }).then(() => {
     if (mongoose.connection.readyState !== 1) {
       throw new Error('MongoDB connection not ready after connect.');

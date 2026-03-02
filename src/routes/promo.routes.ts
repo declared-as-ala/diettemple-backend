@@ -13,7 +13,7 @@ router.post(
     body('code').notEmpty().withMessage('Code promo requis'),
     body('subtotal').isFloat({ min: 0 }).withMessage('Sous-total invalide'),
   ],
-  async (req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res) => {
     try {
       const { code, subtotal } = req.body;
 

@@ -44,7 +44,16 @@ if (process.env.JWT_SECRET.length < 32) {
 
 const app = express();
 
-app.use(cors());
+// CORS: allow requests from any origin (admin, mobile, web). Restrict via CORS_ORIGIN in production if needed.
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(
+  cors({
+    origin: corsOrigin === undefined || corsOrigin === '' ? true : corsOrigin.split(',').map((o) => o.trim()),
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
