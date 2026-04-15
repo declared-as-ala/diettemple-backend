@@ -5,8 +5,21 @@ import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import Order from '../models/Order.model';
 import Cart from '../models/Cart.model';
 import Product from '../models/Product.model';
+import Subscription from '../models/Subscription.model';
 import { generateOrderReference } from '../utils/order.utils';
 import { calculateDeliveryFee, calculateCartTotals } from '../utils/delivery.utils';
+
+/** Returns true if a userId has an ACTIVE subscription that hasn't expired yet */
+async function isUhSubscribed(userId: string | null): Promise<boolean> {
+  if (!userId) return false;
+  const now = new Date();
+  const sub = await Subscription.findOne({
+    userId,
+    status: 'ACTIVE',
+    endAt: { $gte: now },
+  }).lean();
+  return !!sub;
+}
 
 const router = Router();
 
@@ -66,6 +79,9 @@ router.post(
         return res.status(400).json({ message: 'Panier vide' });
       }
 
+      // Determine if the user is UH subscribed (for server-enforced UH pricing)
+      const uhSubscribed = await isUhSubscribed(userId);
+
       let calculatedSubtotal = 0;
 
       for (const item of orderItems) {
@@ -76,15 +92,20 @@ router.post(
         }
 
         if (product.stock < item.quantity) {
-          return res.status(400).json({ 
-            message: `Stock insuffisant pour ${product.name}. Disponible: ${product.stock}, Demandé: ${item.quantity}` 
+          return res.status(400).json({
+            message: `Stock insuffisant pour ${product.name}. Disponible: ${product.stock}, Demandé: ${item.quantity}`
           });
         }
 
-        // Use provided price or calculate from product
-        const itemPrice = item.price || (product.discount 
-          ? product.price * (1 - product.discount / 100)
-          : product.price);
+        // Server-side price: UH price for UH subscribers, else regular discount price
+        let itemPrice: number;
+        if (uhSubscribed && product.uhPrice != null && product.uhPrice > 0) {
+          itemPrice = product.uhPrice;
+        } else {
+          itemPrice = product.discount
+            ? product.price * (1 - product.discount / 100)
+            : product.price;
+        }
 
         calculatedSubtotal += itemPrice * item.quantity;
       }

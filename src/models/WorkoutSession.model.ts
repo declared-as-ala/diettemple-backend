@@ -3,6 +3,7 @@ import { IExercise } from './Exercise.model';
 
 export interface IExerciseSession extends Document {
   exerciseId: mongoose.Types.ObjectId | IExercise;
+  exerciseName?: string;     // denormalized for display
   status: 'pending' | 'in_progress' | 'completed' | 'skipped';
   sets: {
     setNumber: number;
@@ -12,19 +13,22 @@ export interface IExerciseSession extends Document {
     completed?: boolean;
     completedAt?: Date;
   }[];
+  totalVolumeKg?: number;   // sum of (repsCompleted * weight) across all sets
   startedAt?: Date;
   completedAt?: Date;
 }
 
 export interface IWorkoutSession extends Document {
   userId: mongoose.Types.ObjectId;
-  sessionId: mongoose.Types.ObjectId; // Reference to Session template
+  sessionId: mongoose.Types.ObjectId; // Reference to Session template (or SessionTemplate)
   date: Date;
   workoutType?: string;
   exercises: IExerciseSession[];
   gymPhotoUrl?: string; // Optional gym check-in photo
   startedAt: Date;
   completedAt?: Date;
+  durationSeconds?: number;          // total duration in seconds
+  totalSessionVolumeKg?: number;     // sum of all exercise volumes
   xpGained: number;
   status: 'active' | 'completed' | 'abandoned';
   createdAt: Date;
@@ -37,6 +41,9 @@ const ExerciseSessionSchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Exercise',
       required: true,
+    },
+    exerciseName: {
+      type: String,
     },
     status: {
       type: String,
@@ -67,6 +74,10 @@ const ExerciseSessionSchema: Schema = new Schema(
         },
       },
     ],
+    totalVolumeKg: {
+      type: Number,
+      default: 0,
+    },
     startedAt: {
       type: Date,
     },
@@ -110,6 +121,13 @@ const WorkoutSessionSchema: Schema = new Schema(
     },
     completedAt: {
       type: Date,
+    },
+    durationSeconds: {
+      type: Number,
+    },
+    totalSessionVolumeKg: {
+      type: Number,
+      default: 0,
     },
     xpGained: {
       type: Number,

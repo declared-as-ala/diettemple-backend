@@ -7,12 +7,17 @@ import { extractJsonObject } from '../utils/jsonExtract';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-/** Vision models (primary then fallback). Updated from test-vision-models.ts output. */
+console.log('[meal-scan] API key loaded:', OPENROUTER_API_KEY ? `${OPENROUTER_API_KEY.slice(0, 12)}...` : 'MISSING');
+/** Free vision-capable models on OpenRouter (primary then fallbacks). */
 const MEAL_MODELS = [
-  'google/gemma-3-12b-it:free',
   'google/gemma-3-4b-it:free',
+  'google/gemma-3-12b-it:free',
+  'google/gemma-3-27b-it:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',
 ];
 const REQUEST_TIMEOUT_MS = 14_000;
+const MAX_RETRIES_PER_MODEL = 1; // retry once within same model on timeout or 5xx
 
 const CATEGORIES = ['protein', 'carb', 'fat', 'vegetable', 'fruit', 'sauce', 'drink', 'other'] as const;
 
@@ -100,16 +105,21 @@ function validateAndNormalizeItems(raw: unknown): MealDetectionItem[] {
   if (!Array.isArray(raw)) return [];
   const out: MealDetectionItem[] = [];
   for (let i = 0; i < Math.min(raw.length, 8); i++) {
-    const x = raw[i];
+    const x = raw[i] as any;
     if (!x || typeof x !== 'object') continue;
-    const label = String((x as any).label ?? 'Aliment').trim();
-    if (!label) continue;
-    const macrosPer100g = parseMacrosPer100g((x as any).macrosPer100g);
+    // Accept label / name / food / aliment / item / ingredient
+    const label = String(x.label ?? x.name ?? x.food ?? x.aliment ?? x.item ?? x.ingredient ?? 'Aliment').trim();
+    if (!label || label === 'Aliment') continue;
+    // Accept defaultGrams / grams / amount / quantity / weight / portion
+    const gramsRaw = x.defaultGrams ?? x.grams ?? x.amount ?? x.quantity ?? x.weight ?? x.portion ?? 100;
+    // Accept macrosPer100g / macros / nutrition / nutrients / per100g
+    const macrosRaw = x.macrosPer100g ?? x.macros ?? x.nutrition ?? x.nutrients ?? x.per100g ?? x.nutritionPer100g;
+    const macrosPer100g = parseMacrosPer100g(macrosRaw);
     out.push({
       label: label.charAt(0).toUpperCase() + label.slice(1).toLowerCase(),
-      confidence: clampConfidence((x as any).confidence),
-      category: normalizeCategory((x as any).category),
-      defaultGrams: clampDefaultGrams((x as any).defaultGrams),
+      confidence: clampConfidence(x.confidence ?? x.score ?? 0.7),
+      category: normalizeCategory(x.category ?? x.type ?? x.group),
+      defaultGrams: clampDefaultGrams(gramsRaw),
       ...(macrosPer100g && { macrosPer100g }),
     });
   }
@@ -117,10 +127,14 @@ function validateAndNormalizeItems(raw: unknown): MealDetectionItem[] {
 }
 
 function parseMealResponse(content: string): MealDetectionSuccess | null {
-  const parsed = extractJsonObject<{ items?: unknown; notes?: string }>(content);
+  const parsed = extractJsonObject<Record<string, unknown>>(content);
   if (!parsed) return null;
-  const items = validateAndNormalizeItems(parsed.items);
-  const notes = typeof parsed.notes === 'string' ? parsed.notes.trim() : 'Détection IA. Vérifie les aliments et les quantités avant validation.';
+  // Accept common aliases: items / foods / food / aliments / results
+  const rawItems = parsed.items ?? parsed.foods ?? parsed.food ?? parsed.aliments ?? parsed.results ?? parsed.ingredients;
+  const items = validateAndNormalizeItems(rawItems);
+  // Accept common note aliases
+  const rawNotes = parsed.notes ?? parsed.note ?? parsed.description ?? parsed.summary ?? parsed.remarques;
+  const notes = typeof rawNotes === 'string' ? rawNotes.trim() : '';
   return {
     ok: true,
     source: 'openrouter',
@@ -141,15 +155,18 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Call OpenRouter vision for meal analysis.
- * On 429 (rate limit) or 503: tries next model in MEAL_MODELS, then returns a clear message.
+ * Per-model retry (MAX_RETRIES_PER_MODEL) on timeout or 5xx, then falls to next model.
+ * On 429: no per-model retry, go straight to next model.
  * Returns structured result or provider_error/parse_error (no fake data).
  */
 export async function analyzeMealWithOpenRouter(
   imageBuffer: Buffer,
   mime: string = 'image/jpeg'
 ): Promise<MealDetectionResult> {
+  const requestId = `meal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
   if (!OPENROUTER_API_KEY) {
-    console.warn('[meal-scan] OPENROUTER_API_KEY missing');
+    console.warn(`[meal-scan] requestId=${requestId} OPENROUTER_API_KEY missing`);
     return {
       ok: false,
       code: 'provider_error',
@@ -159,7 +176,9 @@ export async function analyzeMealWithOpenRouter(
 
   const imageDataUrl = getDataUrl(imageBuffer, mime);
   const rateLimitMessage =
-    'Le service d’analyse est temporairement surchargé. Réessaye dans une minute ou ajoute les aliments manuellement.';
+    'Le service d\'analyse est temporairement surchargé. Réessaye dans une minute ou ajoute les aliments manuellement.';
+
+  console.log(`[meal-scan] requestId=${requestId} start mime=${mime} size=${imageBuffer.length}`);
 
   for (let modelIndex = 0; modelIndex < MEAL_MODELS.length; modelIndex++) {
     const model = MEAL_MODELS[modelIndex];
@@ -174,101 +193,121 @@ export async function analyzeMealWithOpenRouter(
           ],
         },
       ],
-      max_tokens: 512,
+      max_tokens: 1500,
       temperature: 0,
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const maxAttempts = MAX_RETRIES_PER_MODEL + 1;
+    let lastError: string | undefined;
 
-    try {
-      const res = await fetch(OPENROUTER_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://diettemple.app',
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      const responseText = await res.text();
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[meal-scan] OpenRouter model=', model, 'status=', res.status, 'response length=', responseText.length);
-      }
+      try {
+        const res = await fetch(OPENROUTER_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://diettemple.app',
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        const responseText = await res.text();
 
-      if (res.ok) {
-        let data: { choices?: Array<{ message?: { content?: string } }> };
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          console.warn('[meal-scan] provider_error: response not JSON');
+        console.log(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} status=${res.status} response_len=${responseText.length}`);
+
+        if (res.ok) {
+          let data: { choices?: Array<{ message?: { content?: string; reasoning?: string } }> };
+          try {
+            data = JSON.parse(responseText);
+          } catch {
+            console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} provider_error: response not JSON`);
+            lastError = 'response_not_json';
+            break; // move to next model
+          }
+          const msg = data?.choices?.[0]?.message;
+          // some models put content in reasoning field
+          const content = (msg?.content ?? msg?.reasoning ?? '').trim();
+          if (!content) {
+            console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} provider_error: empty content raw=${responseText.slice(0, 300)}`);
+            lastError = 'empty_content';
+            break; // move to next model
+          }
+          const parsed = parseMealResponse(content);
+          if (parsed) {
+            console.log(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} success items=${parsed.items.length} labels=${parsed.items.map((i) => i.label).join(',')}`);
+            return parsed;
+          }
+          console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} parse_error content_len=${content.length} content_preview=${content.slice(0, 500)}`);
+          return {
+            ok: false,
+            code: 'parse_error',
+            message: 'Analyse indisponible pour le moment. Tu peux ajouter les aliments manuellement.',
+          };
+        }
+
+        // 429: rate limit — wait before trying next model
+        if (res.status === 429) {
+          console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} status=429 rate_limited`);
+          lastError = 'rate_limit';
+          if (modelIndex < MEAL_MODELS.length - 1) await sleep(2000);
+          break;
+        }
+
+        // 5xx: retry within same model before falling back
+        if (res.status >= 500 && res.status < 600) {
+          console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} status=${res.status} server_error body=${responseText.slice(0, 200)}`);
+          lastError = `server_error_${res.status}`;
+          if (attempt < maxAttempts) {
+            await sleep(600);
+            continue;
+          }
+          break; // move to next model
+        }
+
+        // Other 4xx: no retry
+        console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} status=${res.status} client_error body=${responseText.slice(0, 200)}`);
+        lastError = `http_${res.status}`;
+        break; // move to next model
+      } catch (e: unknown) {
+        clearTimeout(timeoutId);
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const isTimeout = /abort|timeout/i.test(errMsg);
+        console.warn(`[meal-scan] requestId=${requestId} model=${model} attempt=${attempt} ${isTimeout ? 'timeout' : 'error'} msg=${errMsg}`);
+        lastError = isTimeout ? 'timeout' : 'network_error';
+        if (isTimeout && attempt < maxAttempts) {
+          // retry once more on timeout
+          await sleep(500);
           continue;
         }
-        const content = data?.choices?.[0]?.message?.content?.trim() ?? '';
-        if (!content) {
-          console.warn('[meal-scan] provider_error: empty content');
-          continue;
-        }
-        const parsed = parseMealResponse(content);
-        if (parsed) {
-          console.log('[meal-scan] parsed items=', parsed.items.length, 'labels=', parsed.items.map((i) => i.label));
-          return parsed;
-        }
-        console.warn('[meal-scan] parse_error: invalid JSON shape content_len=', content.length);
-        return {
-          ok: false,
-          code: 'parse_error',
-          message: 'Analyse indisponible pour le moment. Tu peux ajouter les aliments manuellement.',
-        };
+        break; // move to next model
       }
-
-      const isRateLimit = res.status === 429;
-      const isServerError = res.status >= 500 && res.status < 600;
-      if (isRateLimit || isServerError) {
-        console.warn('[meal-scan] provider_error status=', res.status, 'body=', responseText.slice(0, 200));
-        if (modelIndex < MEAL_MODELS.length - 1) {
-          const delay = 600;
-          console.log('[meal-scan] trying fallback model in', delay, 'ms');
-          await sleep(delay);
-          continue;
-        }
-        return {
-          ok: false,
-          code: 'provider_error',
-          message: isRateLimit ? rateLimitMessage : 'Service temporairement indisponible. Réessaye dans un instant ou ajoute les aliments manuellement.',
-        };
-      }
-
-      console.warn('[meal-scan] provider_error status=', res.status, 'body=', responseText.slice(0, 200));
-      if (modelIndex < MEAL_MODELS.length - 1) {
-        await sleep(400);
-        continue;
-      }
-      return {
-        ok: false,
-        code: 'provider_error',
-        message: 'Analyse IA indisponible pour le moment. Tu peux ajouter les aliments manuellement.',
-      };
-    } catch (e: unknown) {
-      clearTimeout(timeoutId);
-      const errMsg = e instanceof Error ? e.message : String(e);
-      const isTimeout = /abort|timeout/i.test(errMsg);
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('[meal-scan]', isTimeout ? 'timeout' : 'error', 'model=', model, 'msg=', errMsg);
-      }
-      if (modelIndex < MEAL_MODELS.length - 1) {
-        await sleep(500);
-        continue;
-      }
-      return {
-        ok: false,
-        code: 'provider_error',
-        message: isTimeout ? 'La requête a pris trop de temps. Réessaye ou ajoute les aliments manuellement.' : rateLimitMessage,
-      };
     }
+
+    // Try next model if available
+    if (modelIndex < MEAL_MODELS.length - 1) {
+      console.log(`[meal-scan] requestId=${requestId} model=${model} failed(${lastError}) trying_next_model`);
+      await sleep(1000);
+      continue;
+    }
+
+    // All models exhausted
+    const isRateLimit = lastError === 'rate_limit';
+    const isTimeout = lastError === 'timeout';
+    console.warn(`[meal-scan] requestId=${requestId} all_models_failed last_error=${lastError}`);
+    return {
+      ok: false,
+      code: 'provider_error',
+      message: isRateLimit
+        ? rateLimitMessage
+        : isTimeout
+          ? 'La requête a pris trop de temps. Réessaye ou ajoute les aliments manuellement.'
+          : 'Analyse IA indisponible pour le moment. Tu peux ajouter les aliments manuellement.',
+    };
   }
 
   return {

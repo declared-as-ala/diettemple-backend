@@ -16,6 +16,10 @@ export interface IProduct extends Document {
   weight: string;
   price: number;
   discount?: number;
+  /** UH Premium price — only for users with an ACTIVE subscription. Must be <= price. */
+  uhPrice?: number | null;
+  /** If true, only UH subscribed users see this product */
+  isUhExclusive?: boolean;
   images: string[];
   stock: number;
   isFeatured: boolean;
@@ -72,6 +76,23 @@ const ProductSchema: Schema = new Schema(
       min: 0,
       max: 100,
       default: 0,
+    },
+    uhPrice: {
+      type: Number,
+      min: 0,
+      default: null,
+      validate: {
+        validator: function (this: any, val: number | null) {
+          if (val === null || val === undefined) return true;
+          return val <= this.price;
+        },
+        message: 'uhPrice must be less than or equal to price',
+      },
+    },
+    isUhExclusive: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
     images: {
       type: [String],

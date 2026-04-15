@@ -15,15 +15,77 @@ import NutritionPlanTemplate from '../models/NutritionPlanTemplate.model';
 import DailyNutritionLog from '../models/DailyNutritionLog.model';
 import Food from '../models/Food.model';
 import RecipeFavorite from '../models/RecipeFavorite.model';
+import User from '../models/User.model';
+import ClientPlanOverride from '../models/ClientPlanOverride.model';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
-const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-function getDayKey(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
-  const idx = d.getDay();
-  return DAY_KEYS[idx];
+/**
+ * Level template + GET /plan/week use positional keys: "mon" = day 0 of each program week
+ * (first day after planStart), NOT necessarily a real Monday. Must match plan/week loop:
+ * dayKeys[i] for i = 0..6 with dayDate = planStart + (weekNumber-1)*7 + i.
+ */
+const PLAN_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+type PlanTemplateDayKey = (typeof PLAN_DAY_KEYS)[number];
+
+/**
+ * Parse YYYY-MM-DD as the user's intended calendar day (from mobile local date).
+ * Uses UTC midnight for that date for DailyProgram / log queries and civil diffDays vs startAt.
+ */
+function parseCalendarDateForMeToday(dateStr: string): {
+  today: Date;
+  endOfDay: Date;
+  /** Real calendar weekday label for ?date= (display only) */
+  dayName: string;
+} {
+  const trimmed = dateStr.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!m) {
+    const d = new Date(trimmed);
+    d.setHours(0, 0, 0, 0);
+    const end = new Date(d);
+    end.setHours(23, 59, 59, 999);
+    const idx = d.getDay();
+    return { today: d, endOfDay: end, dayName: DAY_NAMES[idx] };
+  }
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const day = Number(m[3]);
+  const today = new Date(Date.UTC(y, mo - 1, day, 0, 0, 0, 0));
+  const endOfDay = new Date(Date.UTC(y, mo - 1, day, 23, 59, 59, 999));
+  const utcDow = today.getUTCDay();
+  return {
+    today,
+    endOfDay,
+    dayName: DAY_NAMES[utcDow],
+  };
+}
+
+/** Slot within a Mon–Sun week: diffDays from program anchor Monday; 0 → mon. */
+function planTemplateDayKeyFromDiffDays(diffDays: number): PlanTemplateDayKey {
+  const idx = ((diffDays % 7) + 7) % 7;
+  return PLAN_DAY_KEYS[idx];
+}
+
+/** Start of calendar day in UTC (for subscription start alignment). */
+function utcStartOfCalendarDate(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Monday 00:00 UTC of the week that contains `d`'s UTC calendar date.
+ * Admin planner labels LUN→DIM as real Mon→Sun; template keys mon..sun must match that,
+ * not "day 0 = subscription start" rolling weeks.
+ */
+function utcMondayStartOfWeekContaining(d: Date): number {
+  const ms = utcStartOfCalendarDate(d);
+  const dow = new Date(ms).getUTCDay(); // 0 Sun … 6 Sat
+  const daysSinceMonday = dow === 0 ? 6 : dow - 1;
+  return ms - daysSinceMonday * MS_PER_DAY;
 }
 
 /** Calendar days from today (server start-of-day) to endAt start-of-day. Can be negative if expired. */
@@ -104,29 +166,85 @@ router.get(
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
       const dateStr = (req.query.date as string) || new Date().toISOString().split('T')[0];
-      const today = new Date(dateStr);
-      today.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
-      const dayKey = getDayKey(today);
-      const dayName = DAY_NAMES[today.getDay()];
+      const { today, endOfDay, dayName } = parseCalendarDateForMeToday(dateStr);
 
       let subscription: any = null;
       let todaySession: any = null;
       let weekNumber = 1;
+      /** True when subscription is tied to a level template with weeks (admin 5-week plan). */
+      let hasLevelTemplatePlan = false;
 
-      // Prefer DailyProgram for this date when present (seed / planner override)
+      // ── 1. Load subscription first — it is the source of truth for week/day ──
+      let sub = await Subscription.findOne({
+        userId,
+        status: 'ACTIVE',
+        endAt: { $gt: new Date() },
+      }).populate('levelTemplateId');
+      if (!sub) {
+        sub = await Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId').lean() as any;
+      }
+
+      if (sub) {
+        const { status: subStatus, daysRemaining: days } = computeSubscriptionState({ status: sub.status, endAt: sub.endAt });
+        const lastAction = getLastActionFromHistory((sub as any).history);
+        subscription = {
+          status: subStatus,
+          startAt: sub.startAt,
+          endAt: sub.endAt,
+          daysRemaining: days,
+          levelName: (sub.levelTemplateId as any)?.name ?? null,
+          lastAction: lastAction?.action ?? null,
+          lastActionAt: lastAction?.date ?? null,
+        };
+      }
+
+      // ── 2. LevelTemplate is authoritative for workout — resolve week + day from it ──
+      if (sub) {
+        const level = sub.levelTemplateId as any;
+        const levelDoc = level?._id ? await LevelTemplate.findById(level._id).lean() : null;
+        hasLevelTemplatePlan =
+          !!levelDoc && Array.isArray((levelDoc as any).weeks) && (levelDoc as any).weeks.length > 0;
+
+        if (hasLevelTemplatePlan) {
+          const programAnchorMs = utcMondayStartOfWeekContaining(new Date(sub.startAt));
+          const todayUtcMs = utcStartOfCalendarDate(today);
+          const diffDays = Math.floor((todayUtcMs - programAnchorMs) / MS_PER_DAY);
+          weekNumber = Math.min(5, Math.max(1, Math.floor(diffDays / 7) + 1));
+          const templateDayKey = planTemplateDayKeyFromDiffDays(diffDays);
+          const week = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
+          const placements = week?.days?.[templateDayKey] || [];
+          const firstPlacement = placements[0];
+          if (firstPlacement?.sessionTemplateId) {
+            const session = await SessionTemplate.findById(firstPlacement.sessionTemplateId)
+              .select('title durationMinutes difficulty items')
+              .lean();
+            if (session) {
+              const items = (session as any).items ?? [];
+              todaySession = {
+                sessionTemplateId: (session as any)._id,
+                title: (session as any).title,
+                durationMinutes: (session as any).durationMinutes,
+                difficulty: (session as any).difficulty,
+                exerciseCount: Array.isArray(items) ? items.length : 0,
+              };
+            }
+          }
+        }
+      }
+
+      // Row for nutrition / calorieTarget; never used for workout when hasLevelTemplatePlan (avoids stale Push B etc.)
       const dailyProgram = await DailyProgram.findOne({
         userId,
         date: { $gte: today, $lte: endOfDay },
       }).lean();
 
-      if (dailyProgram) {
+      // ── 3. DailyProgram session — only for legacy users without a 5-week level template ──
+      if (!todaySession && !hasLevelTemplatePlan && dailyProgram) {
         const dp = dailyProgram as any;
         if (dp.weekNumber != null) weekNumber = dp.weekNumber;
         const sessionIdToUse = dp.sessionTemplateId || dp.sessionId;
         if (sessionIdToUse) {
-          let session = await SessionTemplate.findById(sessionIdToUse)
+          const session = await SessionTemplate.findById(sessionIdToUse)
             .select('title durationMinutes difficulty items')
             .lean();
           if (session) {
@@ -152,58 +270,6 @@ router.get(
         }
       }
 
-      let sub = await Subscription.findOne({
-        userId,
-        status: 'ACTIVE',
-        endAt: { $gt: new Date() },
-      }).populate('levelTemplateId');
-      if (!sub) {
-        sub = await Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId').lean() as any;
-      }
-
-      if (sub) {
-        const { status: subStatus, daysRemaining: days } = computeSubscriptionState({ status: sub.status, endAt: sub.endAt });
-        const lastAction = getLastActionFromHistory((sub as any).history);
-        subscription = {
-          status: subStatus,
-          startAt: sub.startAt,
-          endAt: sub.endAt,
-          daysRemaining: days,
-          levelName: (sub.levelTemplateId as any)?.name ?? null,
-          lastAction: lastAction?.action ?? null,
-          lastActionAt: lastAction?.date ?? null,
-        };
-      }
-
-      if (!todaySession && sub) {
-        const level = sub.levelTemplateId as any;
-        const startAt = new Date(sub.startAt);
-        startAt.setHours(0, 0, 0, 0);
-        const diffDays = Math.floor((today.getTime() - startAt.getTime()) / (24 * 60 * 60 * 1000));
-        weekNumber = Math.min(5, Math.max(1, Math.floor(diffDays / 7) + 1));
-        const levelDoc = await LevelTemplate.findById(level?._id).lean();
-        const week = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
-        const placements = week?.days?.[dayKey] || [];
-        const firstPlacement = placements[0];
-        if (firstPlacement?.sessionTemplateId) {
-          const session = await SessionTemplate.findById(firstPlacement.sessionTemplateId)
-            .select('title durationMinutes difficulty items')
-            .lean();
-          if (session) {
-            const items = (session as any).items ?? [];
-            todaySession = {
-              sessionTemplateId: (session as any)._id,
-              title: (session as any).title,
-              durationMinutes: (session as any).durationMinutes,
-              difficulty: (session as any).difficulty,
-              exerciseCount: Array.isArray(items) ? items.length : 0,
-            };
-          } else {
-            todaySession = null;
-          }
-        }
-      }
-
       const now = new Date();
       const nutritionAssignment = await UserNutritionPlan.findOne({
         userId,
@@ -212,22 +278,36 @@ router.get(
         endAt: { $gte: now },
       }).populate('nutritionPlanTemplateId');
 
+      // Always fetch admin-set direct targets — they override everything
+      const userNtDoc = await User.findById(userId).select('nutritionTarget').lean();
+      const userNt = (userNtDoc as any)?.nutritionTarget;
+
       let nutritionTargets: any = null;
       let meals: any[] = [];
       if (nutritionAssignment) {
         const template = nutritionAssignment.nutritionPlanTemplateId as any;
         const adj = nutritionAssignment.adjustments || {};
+        // User.nutritionTarget (set by coach) takes priority over plan template values
         nutritionTargets = {
-          dailyCalories: adj.dailyCalories ?? template?.dailyCalories,
-          proteinG: adj.proteinG ?? template?.macros?.proteinG,
-          carbsG: adj.carbsG ?? template?.macros?.carbsG,
-          fatG: adj.fatG ?? template?.macros?.fatG,
+          dailyCalories: userNt?.dailyCalories ?? adj.dailyCalories ?? template?.dailyCalories,
+          proteinG:      userNt?.proteinG      ?? adj.proteinG      ?? template?.macros?.proteinG,
+          carbsG:        userNt?.carbsG        ?? adj.carbsG        ?? template?.macros?.carbsG,
+          fatG:          userNt?.fatG          ?? adj.fatG          ?? template?.macros?.fatG,
         };
         meals = template?.mealsTemplate || [];
       }
-      // Fallback: use DailyProgram.calorieTarget as objectif du jour when no nutrition plan (e.g. after seed:user1-today)
+      // Fallback: use DailyProgram.calorieTarget as objectif du jour when no nutrition plan
       if (!nutritionTargets && dailyProgram && (dailyProgram as any).calorieTarget != null) {
         nutritionTargets = { dailyCalories: (dailyProgram as any).calorieTarget };
+      }
+      // Final fallback: admin-set nutritionTarget
+      if (!nutritionTargets && userNt?.dailyCalories) {
+        nutritionTargets = {
+          dailyCalories: userNt.dailyCalories,
+          proteinG: userNt.proteinG,
+          carbsG: userNt.carbsG,
+          fatG: userNt.fatG,
+        };
       }
 
       const log = await DailyNutritionLog.findOne({ userId, date: today }).lean();
@@ -302,17 +382,26 @@ router.get(
         endAt: { $gte: date },
       }).populate('nutritionPlanTemplateId');
 
+      // Always fetch admin-set direct targets — they override everything
+      const userDoc = await User.findById(userId).select('nutritionTarget').lean();
+      const nt = (userDoc as any)?.nutritionTarget;
+
       if (!assignment) {
-        return res.json({ targets: null, meals: [], log: null, dateKey: dateStr });
+        const fallbackTargets = nt?.dailyCalories
+          ? { dailyCalories: nt.dailyCalories, proteinG: nt.proteinG, carbsG: nt.carbsG, fatG: nt.fatG }
+          : null;
+        const log = await DailyNutritionLog.findOne({ userId, date }).lean();
+        return res.json({ targets: fallbackTargets, meals: [], log, dateKey: dateStr });
       }
 
       const template = assignment.nutritionPlanTemplateId as any;
       const adj = assignment.adjustments || {};
+      // User.nutritionTarget (set by coach) takes priority over plan template values
       const targets = {
-        dailyCalories: adj.dailyCalories ?? template?.dailyCalories,
-        proteinG: adj.proteinG ?? template?.macros?.proteinG,
-        carbsG: adj.carbsG ?? template?.macros?.carbsG,
-        fatG: adj.fatG ?? template?.macros?.fatG,
+        dailyCalories: nt?.dailyCalories ?? adj.dailyCalories ?? template?.dailyCalories,
+        proteinG:      nt?.proteinG      ?? adj.proteinG      ?? template?.macros?.proteinG,
+        carbsG:        nt?.carbsG        ?? adj.carbsG        ?? template?.macros?.carbsG,
+        fatG:          nt?.fatG          ?? adj.fatG          ?? template?.macros?.fatG,
       };
       const log = await DailyNutritionLog.findOne({ userId, date }).lean();
 
@@ -604,20 +693,15 @@ router.post(
   }
 );
 
-function addDays(d: Date, n: number): Date {
-  const out = new Date(d);
-  out.setDate(out.getDate() + n);
-  return out;
-}
-
-function dateToKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+/** YYYY-MM-DD from UTC calendar parts (aligned with /me/today civil dates). */
+function dateToKeyUtc(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 
-// GET /api/me/plan/week?weekNumber=1..5 — returns plan boundaries and days with dates + sessions (DailyProgram overrides template)
+// GET /api/me/plan/week?weekNumber=1..5 — Mon–Sun weeks anchored to Monday of subscription week (same as /me/today)
 router.get(
   '/plan/week',
   [query('weekNumber').isInt({ min: 1, max: 5 })],
@@ -637,13 +721,18 @@ router.get(
       }
 
       const weekNumber = parseInt(req.query.weekNumber as string, 10);
-      const planStart = new Date((sub as any).startAt);
-      planStart.setHours(0, 0, 0, 0);
-      const planEnd = new Date((sub as any).endAt);
+      const planStartMs = utcMondayStartOfWeekContaining(new Date((sub as any).startAt));
       const durationWeeks = 5;
 
-      const level = await LevelTemplate.findById((sub as any).levelTemplateId._id).lean();
+      // Prefer coach-assigned ClientPlanOverride, fall back to subscription's levelTemplateId
+      const planOverride = await ClientPlanOverride.findOne({ userId, status: 'active' }).lean();
+      const levelId = planOverride
+        ? (planOverride as any).baseLevelTemplateId
+        : (sub as any).levelTemplateId?._id ?? (sub as any).levelTemplateId;
+      const level = levelId ? await LevelTemplate.findById(levelId).lean() : null;
       const week = (level as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
+      const hasLevelTemplatePlan =
+        !!level && Array.isArray((level as any).weeks) && (level as any).weeks.length > 0;
       const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 
       const sessionIds = new Set<string>();
@@ -659,32 +748,45 @@ router.get(
 
       const days: Array<{ day: string; date: string; dateKey: string; sessions: Array<{ sessionTemplateId: string; title?: string; durationMinutes?: number }> }> = [];
       for (let i = 0; i < 7; i++) {
-        const dayDate = addDays(planStart, (weekNumber - 1) * 7 + i);
-        const dayStart = new Date(dayDate);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(dayDate);
-        dayEnd.setHours(23, 59, 59, 999);
-        const dateKeyStr = dateToKey(dayStart);
-
-        const dailyProgram = await DailyProgram.findOne({
-          userId,
-          date: { $gte: dayStart, $lte: dayEnd },
-        }).lean();
+        const offsetDays = (weekNumber - 1) * 7 + i;
+        const dayStart = new Date(planStartMs + offsetDays * MS_PER_DAY);
+        const y = dayStart.getUTCFullYear();
+        const mo = dayStart.getUTCMonth();
+        const d = dayStart.getUTCDate();
+        const dayEnd = new Date(Date.UTC(y, mo, d, 23, 59, 59, 999));
+        const dateKeyStr = dateToKeyUtc(dayStart);
 
         let sessionsForDay: Array<{ sessionTemplateId: string; title?: string; durationMinutes?: number }> = [];
-        if (dailyProgram && (dailyProgram as any).sessionTemplateId) {
-          const st = sessionMap.get((dailyProgram as any).sessionTemplateId.toString()) ?? await SessionTemplate.findById((dailyProgram as any).sessionTemplateId).select('title durationMinutes').lean();
-          if (st) {
-            sessionsForDay = [{ sessionTemplateId: (st as any)._id.toString(), title: (st as any).title, durationMinutes: (st as any).durationMinutes }];
-          }
-        }
-        if (sessionsForDay.length === 0 && week) {
+        if (week) {
           const placements = (week.days as any)?.[dayKeys[i]] || [];
-          sessionsForDay = placements.map((p: any) => {
-            const id = p.sessionTemplateId != null ? String(p.sessionTemplateId) : null;
-            const st = id ? sessionMap.get(id) : null;
-            return { sessionTemplateId: id, title: (st as any)?.title, durationMinutes: (st as any)?.durationMinutes };
-          }).filter((s: any) => s.sessionTemplateId);
+          sessionsForDay = placements
+            .map((p: any) => {
+              const id = p.sessionTemplateId != null ? String(p.sessionTemplateId) : null;
+              const st = id ? sessionMap.get(id) : null;
+              return { sessionTemplateId: id, title: (st as any)?.title, durationMinutes: (st as any)?.durationMinutes };
+            })
+            .filter((s: any) => s.sessionTemplateId);
+        }
+        // Stale DailyProgram rows (e.g. seed "Push B") must not override the admin template
+        if (sessionsForDay.length === 0 && !hasLevelTemplatePlan) {
+          const dailyProgram = await DailyProgram.findOne({
+            userId,
+            date: { $gte: dayStart, $lte: dayEnd },
+          }).lean();
+          if (dailyProgram && (dailyProgram as any).sessionTemplateId) {
+            const st =
+              sessionMap.get((dailyProgram as any).sessionTemplateId.toString()) ??
+              (await SessionTemplate.findById((dailyProgram as any).sessionTemplateId).select('title durationMinutes').lean());
+            if (st) {
+              sessionsForDay = [
+                {
+                  sessionTemplateId: (st as any)._id.toString(),
+                  title: (st as any).title,
+                  durationMinutes: (st as any).durationMinutes,
+                },
+              ];
+            }
+          }
         }
 
         days.push({
@@ -784,5 +886,101 @@ router.delete('/recipes/favorites/:id', [param('id').isMongoId()], async (req: A
     res.status(500).json({ message: (e as Error).message });
   }
 });
+
+// POST /api/me/workout/session/complete — save a completed workout session from mobile
+router.post(
+  '/workout/session/complete',
+  [body('sessionTemplateId').notEmpty(), body('exercises').isArray()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user?._id;
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const {
+        sessionTemplateId,
+        durationSeconds = 0,
+        exercises = [],
+      }: {
+        sessionTemplateId: string;
+        durationSeconds?: number;
+        exercises: Array<{
+          exerciseId: string;
+          exerciseName: string;
+          sets: Array<{ setNumber: number; reps: number; weightKg: number; completedAt?: string }>;
+        }>;
+      } = req.body;
+
+      // Build exercises with computed volumes
+      const exercisesWithVolume = exercises.map((ex) => {
+        const totalVolumeKg = ex.sets.reduce(
+          (sum, s) => sum + (s.reps ?? 0) * (s.weightKg ?? 0),
+          0
+        );
+        return {
+          exerciseId: ex.exerciseId,
+          exerciseName: ex.exerciseName ?? '',
+          status: 'completed' as const,
+          sets: ex.sets.map((s, idx) => ({
+            setNumber: s.setNumber ?? idx + 1,
+            weight: s.weightKg ?? 0,
+            repsCompleted: s.reps ?? 0,
+            completed: true,
+            completedAt: s.completedAt ? new Date(s.completedAt) : new Date(),
+          })),
+          totalVolumeKg,
+          completedAt: new Date(),
+        };
+      });
+
+      const totalSessionVolumeKg = exercisesWithVolume.reduce(
+        (sum, ex) => sum + ex.totalVolumeKg,
+        0
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const WorkoutSessionModel = require('../models/WorkoutSession.model').default;
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const ExerciseHistoryModel = require('../models/ExerciseHistory.model').default;
+      const mongoose = require('mongoose');
+
+      const session = await WorkoutSessionModel.create({
+        userId,
+        sessionId: new mongoose.Types.ObjectId(),
+        date: new Date(),
+        exercises: exercisesWithVolume,
+        startedAt: new Date(Date.now() - durationSeconds * 1000),
+        completedAt: new Date(),
+        durationSeconds,
+        totalSessionVolumeKg,
+        status: 'completed',
+        xpGained: 0,
+      });
+
+      // Upsert ExerciseHistory for each exercise
+      for (const ex of exercisesWithVolume) {
+        if (!ex.exerciseId) continue;
+        const lastSet = ex.sets[ex.sets.length - 1];
+        await ExerciseHistoryModel.findOneAndUpdate(
+          { userId, exerciseId: ex.exerciseId },
+          {
+            $set: {
+              lastWeight: lastSet?.weight ?? 0,
+              lastReps: ex.sets.map((s) => s.repsCompleted ?? 0),
+              lastSets: ex.sets,
+              lastCompletedAt: new Date(),
+              totalVolume: ex.totalVolumeKg,
+              progressionStatus: 'stable',
+            },
+          },
+          { upsert: true, new: true }
+        );
+      }
+
+      res.json({ success: true, sessionId: session._id });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
 
 export default router;

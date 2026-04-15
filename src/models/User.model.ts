@@ -18,6 +18,12 @@ export interface IUser extends Document {
   biometricType: 'fingerprint' | 'faceid' | null;
   otp?: string;
   otpExpires?: Date;
+  nutritionTarget?: {
+    dailyCalories?: number;
+    proteinG?: number;
+    carbsG?: number;
+    fatG?: number;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -92,6 +98,12 @@ const UserSchema: Schema = new Schema(
     },
     otpExpires: {
       type: Date,
+    },
+    nutritionTarget: {
+      dailyCalories: { type: Number },
+      proteinG: { type: Number },
+      carbsG: { type: Number },
+      fatG: { type: Number },
     },
   },
   {

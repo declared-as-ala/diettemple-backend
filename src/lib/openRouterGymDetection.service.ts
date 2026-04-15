@@ -8,15 +8,19 @@ import fs from 'fs';
 import path from 'path';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_API_KEY = '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';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 
-/** Single model that works reliably (Gemma 3 12B; no system/developer messages). */
-const OPENROUTER_MODEL_ID = 'google/gemma-3-12b-it:free';
+/** Free vision models — tried in order until one succeeds. */
+const GYM_MODELS = [
+  'google/gemma-3-4b-it:free',
+  'google/gemma-3-12b-it:free',
+  'google/gemma-3-27b-it:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+];
 
 const REQUEST_TIMEOUT_MS = 15_000;
-const MAX_RETRIES_429 = 2;
-const RETRY_DELAY_BASE_MS = 800;
-const RETRY_DELAY_SECOND_MS = 1500;
+const RETRY_DELAY_MS = 1000;
 
 /** Single user-message prompt (Gemma-compatible: no system/developer). */
 const USER_PROMPT = `You are a scene classifier. Look at this image and decide if it shows a gym, fitness center, workout room, or weight room.
@@ -35,9 +39,19 @@ Respond with ONLY a valid JSON object, no other text or markdown. Use this exact
     "looks_like_office_or_shop": true/false,
     "photo_of_screen_or_printed_image": true/false
   },
-  "reason": "short explanation"
+  "reasonCode": "no_equipment" | "too_dark" | "screenshot_suspected" | "not_a_gym" | "gym_confirmed" | "uncertain_scene",
+  "reason": "short explanation in English",
+  "tips": ["conseil en français pour aider l'utilisateur à reprendre une meilleure photo", "conseil optionnel 2"]
 }
-If the image is unclear or you are not sure, use label "uncertain" and lower confidence.`;
+Rules:
+- Use reasonCode "gym_confirmed" when label is "gym".
+- Use reasonCode "no_equipment" when you see a room but no fitness equipment.
+- Use reasonCode "too_dark" when the image is very dark or poorly lit.
+- Use reasonCode "screenshot_suspected" when the image looks like a screenshot or photo of a screen.
+- Use reasonCode "not_a_gym" when it is clearly not a gym (office, home, outdoor, food, etc.).
+- Use reasonCode "uncertain_scene" when unclear.
+- tips must be in French and help the user take a better photo. 1-2 short tips maximum.
+- If the image is unclear or you are not sure, use label "uncertain" and lower confidence.`;
 
 export interface ClassificationLabel {
   label: string;
@@ -58,14 +72,23 @@ export interface OpenRouterGymResult {
   topPredictions: ClassificationLabel[];
   model: string;
   modelResponses?: Record<string, ModelResponseItem>;
+  /** AI-provided reason code for rejection/acceptance */
+  reasonCode?: string;
+  /** AI-provided tips in French for the user */
+  tips?: string[];
 }
+
+const GYM_REASON_CODES = ['no_equipment', 'too_dark', 'screenshot_suspected', 'not_a_gym', 'gym_confirmed', 'uncertain_scene'] as const;
+type GymReasonCode = (typeof GYM_REASON_CODES)[number];
 
 interface ParsedClassifierResponse {
   label: 'gym' | 'not_gym' | 'uncertain';
   confidence: number;
   secondary_label?: string;
   secondary_confidence?: number;
+  reasonCode?: GymReasonCode;
   reason?: string;
+  tips?: string[];
 }
 
 const GYM_LABELS = ['gym interior', 'fitness center', 'workout room', 'weight room'];
@@ -114,18 +137,26 @@ function parseClassifierResponse(text: string): ParsedClassifierResponse | null 
   let secondary_confidence = typeof parsed.secondary_confidence === 'number' ? parsed.secondary_confidence : undefined;
   if (secondary_confidence != null) secondary_confidence = Math.max(0, Math.min(1, secondary_confidence));
   const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : undefined;
+  const rawCode = typeof parsed.reasonCode === 'string' ? parsed.reasonCode.trim() : undefined;
+  const reasonCode = rawCode && GYM_REASON_CODES.includes(rawCode as GymReasonCode) ? (rawCode as GymReasonCode) : undefined;
+  const tips = Array.isArray(parsed.tips)
+    ? (parsed.tips as unknown[]).filter((t) => typeof t === 'string' && (t as string).trim()).map((t) => (t as string).trim()).slice(0, 2)
+    : undefined;
   return {
     label: label as 'gym' | 'not_gym' | 'uncertain',
     confidence,
     secondary_label: secondary_label || undefined,
     secondary_confidence,
+    reasonCode,
     reason,
+    tips: tips && tips.length > 0 ? tips : undefined,
   };
 }
 
-/** Build Gemma-safe request body: only user message, no system/developer, no response_format. */
-function buildRequestBody(imageDataUrl: string): Record<string, unknown> {
+/** Build request body for a given model. */
+function buildRequestBody(imageDataUrl: string, modelId: string): Record<string, unknown> {
   return {
+    model: modelId,
     messages: [
       {
         role: 'user',
@@ -135,7 +166,7 @@ function buildRequestBody(imageDataUrl: string): Record<string, unknown> {
         ],
       },
     ],
-    max_tokens: 512,
+    max_tokens: 1024,
     temperature: 0,
   };
 }
@@ -147,82 +178,45 @@ function sanitizeErrorBody(body: string): string {
   return s;
 }
 
-interface CallResult {
-  success: boolean;
-  modelId: string;
-  content?: string;
-  fullResponse?: unknown;
-  statusCode?: number;
-  errorBody?: string;
-  error?: string;
-}
-
 /**
- * Call the configured model with timeout and 429 retry (exponential backoff + jitter).
+ * Try one model once (no per-model retry — handled by the outer loop).
  */
-async function callModel(imageDataUrl: string): Promise<CallResult> {
-  const modelId = OPENROUTER_MODEL_ID;
-  const body = buildRequestBody(imageDataUrl);
-  const payload = { ...body, model: modelId };
-
-  for (let attempt = 1; attempt <= MAX_RETRIES_429 + 1; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const res = await fetch(OPENROUTER_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://diettemple.app',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      const statusCode = res.status;
-      const responseText = await res.text();
-
-      if (res.ok) {
-        let data: unknown;
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          console.warn(`[OpenRouter] model=${modelId} attempt=${attempt} status=${statusCode} body_parse_failed`);
-          return { success: false, modelId, statusCode, error: 'Invalid JSON response', errorBody: responseText.slice(0, 200) };
-        }
-        const content = (data as { choices?: Array<{ message?: { content?: string } }> })?.choices?.[0]?.message?.content ?? '';
-        console.log(`[OpenRouter] model=${modelId} attempt=${attempt} status=${statusCode} success`);
-        return { success: true, modelId, content, fullResponse: data, statusCode };
+async function callModel(imageDataUrl: string, modelId: string, requestId: string): Promise<{ success: boolean; content?: string; statusCode?: number; error?: string }> {
+  const payload = buildRequestBody(imageDataUrl, modelId);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://diettemple.app',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const statusCode = res.status;
+    const responseText = await res.text();
+    console.log(`[OpenRouter] requestId=${requestId} model=${modelId} status=${statusCode} response_len=${responseText.length}`);
+    if (res.ok) {
+      let data: unknown;
+      try { data = JSON.parse(responseText); } catch {
+        return { success: false, statusCode, error: 'body_parse_failed' };
       }
-
-      if (statusCode === 429 && attempt <= MAX_RETRIES_429) {
-        const delayMs = attempt === 1 ? RETRY_DELAY_BASE_MS : RETRY_DELAY_SECOND_MS;
-        console.warn(`[OpenRouter] model=${modelId} attempt=${attempt} status=429 rate_limited retry_in_ms=${delayMs}`);
-        await sleepWithJitter(delayMs);
-        continue;
-      }
-
-      const sanitized = sanitizeErrorBody(responseText);
-      console.warn(`[OpenRouter] model=${modelId} attempt=${attempt} status=${statusCode} error_body=${sanitized}`);
-      return { success: false, modelId, statusCode, error: `HTTP ${statusCode}`, errorBody: responseText.slice(0, 300) };
-    } catch (e: unknown) {
-      clearTimeout(timeoutId);
-      const errMsg = e instanceof Error ? e.message : String(e);
-      const isTimeout = /abort|timeout/i.test(errMsg);
-      console.warn(`[OpenRouter] model=${modelId} attempt=${attempt} ${isTimeout ? 'timeout' : 'error'} msg=${errMsg}`);
-      if (attempt <= MAX_RETRIES_429) {
-        const delayMs = attempt === 1 ? RETRY_DELAY_BASE_MS : RETRY_DELAY_SECOND_MS;
-        await sleepWithJitter(delayMs);
-        continue;
-      }
-      return { success: false, modelId, error: errMsg };
+      const content = (data as any)?.choices?.[0]?.message?.content?.trim() ?? '';
+      if (!content) return { success: false, statusCode, error: 'empty_content' };
+      return { success: true, content, statusCode };
     }
+    return { success: false, statusCode, error: `HTTP ${statusCode}` };
+  } catch (e: unknown) {
+    clearTimeout(timeoutId);
+    const msg = e instanceof Error ? e.message : String(e);
+    const isTimeout = /abort|timeout/i.test(msg);
+    console.warn(`[OpenRouter] requestId=${requestId} model=${modelId} ${isTimeout ? 'timeout' : 'error'} msg=${msg}`);
+    return { success: false, error: isTimeout ? 'timeout' : msg };
   }
-
-  return { success: false, modelId, error: 'Max retries exceeded' };
 }
 
 function buildResultFromParsed(parsed: ParsedClassifierResponse, modelId: string): OpenRouterGymResult {
@@ -254,6 +248,8 @@ function buildResultFromParsed(parsed: ParsedClassifierResponse, modelId: string
     labels: topPredictions,
     topPredictions: topPredictions.slice(0, 3),
     model: modelId,
+    ...(parsed.reasonCode && { reasonCode: parsed.reasonCode }),
+    ...(parsed.tips && { tips: parsed.tips }),
   };
 }
 
@@ -271,38 +267,50 @@ function safeResult(modelResponses: Record<string, ModelResponseItem>): OpenRout
 }
 
 /**
- * Classify image with OpenRouter (single model: Gemma 3 12B). Retries on 429.
- * On failure or parse error, returns safe result (never throw).
+ * Classify image with OpenRouter. Tries each model in GYM_MODELS until one succeeds.
+ * On 429 waits 1s before next model. Never throws; returns safe result if all fail.
  */
 export async function classifyGymSceneOpenRouter(imagePath: string): Promise<OpenRouterGymResult> {
+  const requestId = `gym-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  if (!OPENROUTER_API_KEY) {
+    console.warn(`[OpenRouter] requestId=${requestId} OPENROUTER_API_KEY missing`);
+    return safeResult({});
+  }
+
+  console.log(`[OpenRouter] requestId=${requestId} start models=${GYM_MODELS.length}`);
   const imageDataUrl = getBase64DataUrl(imagePath);
-  const modelId = OPENROUTER_MODEL_ID;
-  const result = await callModel(imageDataUrl);
+  const modelResponses: Record<string, ModelResponseItem> = {};
 
-  const modelResponses: Record<string, ModelResponseItem> = {
-    [modelId]: {
-      content: result.content ?? '',
-      fullResponse: result.fullResponse,
-      error: result.error,
-      statusCode: result.statusCode,
-    },
-  };
+  for (let i = 0; i < GYM_MODELS.length; i++) {
+    const modelId = GYM_MODELS[i];
+    const result = await callModel(imageDataUrl, modelId, requestId);
 
-  if (!result.success) {
-    console.warn(`[OpenRouter] model=${modelId} failed reason=${result.error ?? result.statusCode}`);
-    return safeResult(modelResponses);
+    modelResponses[modelId] = { content: result.content ?? '', error: result.error, statusCode: result.statusCode };
+
+    if (!result.success) {
+      const isRateLimit = result.statusCode === 429;
+      console.warn(`[OpenRouter] requestId=${requestId} model=${modelId} failed reason=${result.error} trying_next=${i < GYM_MODELS.length - 1}`);
+      if (i < GYM_MODELS.length - 1) {
+        await sleepWithJitter(isRateLimit ? RETRY_DELAY_MS : 400);
+        continue;
+      }
+      break;
+    }
+
+    const content = result.content ?? '';
+    const parsed = parseClassifierResponse(content);
+    if (!parsed) {
+      console.warn(`[OpenRouter] requestId=${requestId} model=${modelId} parse_failed content_len=${content.length} preview=${content.slice(0, 200)}`);
+      if (i < GYM_MODELS.length - 1) { await sleepWithJitter(400); continue; }
+      break;
+    }
+
+    const selected = buildResultFromParsed(parsed, modelId);
+    console.log(`[OpenRouter] requestId=${requestId} model=${modelId} label=${parsed.label} confidence=${parsed.confidence} reasonCode=${parsed.reasonCode ?? 'n/a'}`);
+    return { ...selected, modelResponses };
   }
 
-  const content = result.content ?? '';
-  const parsed = parseClassifierResponse(content);
-  if (!parsed) {
-    console.warn(`[OpenRouter] model=${modelId} parse_failed content_len=${content.length}`);
-    return safeResult(modelResponses);
-  }
-
-  const selected = buildResultFromParsed(parsed, modelId);
-  console.log(`[OpenRouter] model=${modelId} label=${parsed.label} confidence=${parsed.confidence}`);
-  return { ...selected, modelResponses };
+  return safeResult(modelResponses);
 }
 
-export { OPENROUTER_MODEL_ID };

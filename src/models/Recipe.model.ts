@@ -7,6 +7,8 @@ export interface IRecipe extends Document {
   carbs?: number;
   fat?: number;
   imageUrl?: string;
+  /** Multiple image URLs (first is used as primary if imageUrl not set) */
+  images?: string[];
   tags: string[];
   /** upload | youtube */
   videoSource?: 'upload' | 'youtube';
@@ -27,6 +29,7 @@ const RecipeSchema = new Schema(
     carbs: { type: Number },
     fat: { type: Number },
     imageUrl: { type: String },
+    images: { type: [String], default: [] },
     tags: [{ type: String, trim: true }],
     videoSource: { type: String, enum: ['upload', 'youtube'] },
     videoUrl: { type: String },

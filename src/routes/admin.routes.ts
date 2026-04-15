@@ -180,38 +180,30 @@ router.post(
     body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
     body('stock').isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
     body('weight').notEmpty().withMessage('Weight is required'),
+    body('uhPrice').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('UH price must be positive'),
+    body('isUhExclusive').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
       const {
-        name,
-        brand,
-        category,
-        description,
-        composition,
-        flavors,
-        weight,
-        price,
-        discount,
-        promoPrice,
-        stock,
-        images,
-        isActive,
-        isFeatured,
-        tags,
-        nutritionFacts,
+        name, brand, category, description, composition, flavors, weight,
+        price, discount, stock, images, isFeatured, tags, nutritionFacts,
+        uhPrice, isUhExclusive,
       } = req.body;
 
+      // Validate uhPrice <= price
+      if (uhPrice != null && uhPrice > price) {
+        return res.status(400).json({ message: 'Le prix UH doit être inférieur ou égal au prix normal' });
+      }
+
       const product = new Product({
-        name,
-        brand,
-        category,
-        description,
+        name, brand, category, description,
         composition: composition || {},
         flavors: flavors || [],
-        weight,
-        price,
+        weight, price,
         discount: discount || 0,
+        uhPrice: uhPrice ?? null,
+        isUhExclusive: isUhExclusive || false,
         stock: stock || 0,
         images: images || [],
         isFeatured: isFeatured || false,
@@ -234,6 +226,8 @@ router.put(
     param('id').isMongoId(),
     body('price').optional().isFloat({ min: 0 }),
     body('stock').optional().isInt({ min: 0 }),
+    body('uhPrice').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('isUhExclusive').optional().isBoolean(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
@@ -243,6 +237,17 @@ router.put(
       }
 
       const updates = req.body;
+
+      // Validate uhPrice <= effective price
+      const effectivePrice = updates.price ?? product.price;
+      if (updates.uhPrice != null && updates.uhPrice > effectivePrice) {
+        return res.status(400).json({ message: 'Le prix UH doit être inférieur ou égal au prix normal' });
+      }
+      // Allow explicitly setting uhPrice to null to remove it
+      if ('uhPrice' in updates && (updates.uhPrice === null || updates.uhPrice === '')) {
+        updates.uhPrice = null;
+      }
+
       Object.assign(product, updates);
       await product.save();
 
@@ -1557,6 +1562,116 @@ router.put(
       res.status(500).json({ message: error.message });
     }
   }
+);
+
+// ==================== ANALYTICS: WEIGHT LIFTED ====================
+
+// GET /admin/analytics/weight-lifted — all users volume summary
+router.get(
+  '/analytics/weight-lifted',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    // Aggregate sessions per user
+    const userSummaries = await WorkoutSession.aggregate([
+      { $match: { status: 'completed' } },
+      {
+        $group: {
+          _id: '$userId',
+          totalVolumeKg: { $sum: '$totalSessionVolumeKg' },
+          totalSessions: { $sum: 1 },
+          lastSessionAt: { $max: '$completedAt' },
+        },
+      },
+      { $sort: { totalVolumeKg: -1 } },
+    ]);
+
+    // Per-exercise top volumes per user
+    const exerciseAgg = await WorkoutSession.aggregate([
+      { $match: { status: 'completed', 'exercises.0': { $exists: true } } },
+      { $unwind: '$exercises' },
+      {
+        $group: {
+          _id: { userId: '$userId', exerciseName: '$exercises.exerciseName' },
+          totalVolumeKg: { $sum: '$exercises.totalVolumeKg' },
+          maxWeightKg: { $max: { $max: '$exercises.sets.weight' } },
+        },
+      },
+      { $sort: { '_id.userId': 1, totalVolumeKg: -1 } },
+    ]);
+
+    // Build exercise map per user
+    const exerciseMap: Record<string, { exerciseName: string; maxWeightKg: number; totalVolumeKg: number }[]> = {};
+    for (const ex of exerciseAgg) {
+      const uid = String(ex._id.userId);
+      if (!exerciseMap[uid]) exerciseMap[uid] = [];
+      if (exerciseMap[uid].length < 3 && ex._id.exerciseName) {
+        exerciseMap[uid].push({
+          exerciseName: ex._id.exerciseName,
+          maxWeightKg: ex.maxWeightKg ?? 0,
+          totalVolumeKg: ex.totalVolumeKg ?? 0,
+        });
+      }
+    }
+
+    // Populate user details
+    const userIds = userSummaries.map((u) => u._id);
+    const users = await User.find({ _id: { $in: userIds } }).select('name email').lean();
+    const userMap = new Map(users.map((u) => [String(u._id), u]));
+
+    const result = userSummaries.map((u) => {
+      const userData = userMap.get(String(u._id));
+      return {
+        userId: u._id,
+        name: userData?.name ?? 'Unknown',
+        email: (userData as any)?.email ?? '',
+        totalVolumeKg: u.totalVolumeKg ?? 0,
+        totalSessions: u.totalSessions ?? 0,
+        lastSessionAt: u.lastSessionAt ?? null,
+        topExercises: exerciseMap[String(u._id)] ?? [],
+      };
+    });
+
+    res.json({ users: result });
+  })
+);
+
+// GET /admin/analytics/weight-lifted/:userId — detailed session history for one user
+router.get(
+  '/analytics/weight-lifted/:userId',
+  [param('userId').isMongoId()],
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const userId = req.params.userId;
+    const user = await User.findById(userId).select('name email createdAt').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const sessions = await WorkoutSession.find({ userId, status: 'completed' })
+      .sort({ completedAt: -1 })
+      .limit(50)
+      .lean();
+
+    const formatted = sessions.map((s) => ({
+      sessionId: s._id,
+      completedAt: s.completedAt,
+      durationSeconds: (s as any).durationSeconds ?? null,
+      totalVolumeKg: (s as any).totalSessionVolumeKg ?? 0,
+      exercises: (s.exercises ?? []).map((ex: any) => ({
+        exerciseName: ex.exerciseName ?? 'Inconnu',
+        totalVolumeKg: ex.totalVolumeKg ?? 0,
+        sets: (ex.sets ?? []).map((set: any) => ({
+          setNumber: set.setNumber,
+          reps: set.repsCompleted ?? 0,
+          weightKg: set.weight ?? 0,
+        })),
+      })),
+    }));
+
+    res.json({
+      user: { name: (user as any).name, email: (user as any).email },
+      sessions: formatted,
+    });
+  })
 );
 
 // Client analytics and assign-program are under /clients router (GET /:id/analytics, POST /:id/assign-program)

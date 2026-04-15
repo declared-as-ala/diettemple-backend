@@ -43,6 +43,7 @@ if (process.env.JWT_SECRET.length < 32) {
 }
 
 const app = express();
+app.set('etag', false); // Disable ETags — always return 200 with fresh data, never 304
 
 // CORS: allow requests from any origin (admin, mobile, web). Restrict via CORS_ORIGIN in production if needed.
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -54,6 +55,8 @@ app.use(
     credentials: true,
   })
 );
+// Higher limit for scan-meal (base64 image: 6MB raw → ~8MB base64 + overhead)
+app.use('/api/me/nutrition/scan-meal', express.json({ limit: '12mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 

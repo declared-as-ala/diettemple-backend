@@ -8,6 +8,11 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 const router = Router();
 const now = new Date();
 
+/** UTC midnight for the given instant’s calendar date (aligned with /me/today week math). */
+function utcCalendarMidnight(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+}
+
 // Helper: compute effective status (endAt < now => EXPIRED if currently ACTIVE)
 function effectiveStatus(sub: { status: string; endAt: Date }): string {
   if (sub.status !== 'ACTIVE') return sub.status;
@@ -161,6 +166,49 @@ router.get(
       if (!sub) return res.status(404).json({ message: 'Subscription not found' });
       (sub as any).effectiveStatus = effectiveStatus(sub as any);
       res.json({ subscription: sub });
+    } catch (err: unknown) {
+      res.status(500).json({ message: (err as Error).message });
+    }
+  }
+);
+
+// PUT /subscriptions/:id/restart-program-week1 — set startAt to today (UTC date) so app shows semaine 1
+router.put(
+  '/:id/restart-program-week1',
+  [param('id').isMongoId(), body('note').optional().isString()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+      const sub = await Subscription.findById(req.params.id);
+      if (!sub) return res.status(404).json({ message: 'Subscription not found' });
+      const t = new Date();
+      if (sub.status !== 'ACTIVE' || sub.endAt <= t) {
+        return res.status(400).json({ message: 'Subscription must be active to restart program week' });
+      }
+      const newStart = utcCalendarMidnight(t);
+      if (newStart >= sub.endAt) {
+        return res.status(400).json({ message: 'Cannot restart: extend end date first' });
+      }
+      sub.startAt = newStart;
+      sub.history = sub.history || [];
+      sub.history.push({
+        action: 'restart_program',
+        fromLevelTemplateId: sub.levelTemplateId,
+        toLevelTemplateId: sub.levelTemplateId,
+        date: new Date(),
+        adminId: req.user?._id,
+        note: req.body.note ?? 'Repartir semaine 1',
+      });
+      await sub.save();
+      const out = await Subscription.findById(sub._id)
+        .populate('userId', 'name email phone')
+        .populate('levelTemplateId', 'name')
+        .lean();
+      (out as any).effectiveStatus = effectiveStatus(out as any);
+      res.json({ subscription: out });
     } catch (err: unknown) {
       res.status(500).json({ message: (err as Error).message });
     }

@@ -71,9 +71,26 @@ export async function connectMongo(): Promise<void> {
     maxPoolSize: MAX_POOL_SIZE,
     maxIdleTimeMS: MAX_IDLE_TIME_MS,
     waitQueueTimeoutMS: WAIT_QUEUE_TIMEOUT_MS,
-  }).then(() => {
+  }).then(async () => {
     if (mongoose.connection.readyState !== 1) {
       throw new Error('MongoDB connection not ready after connect.');
+    }
+    // Migrate legacy leveltemplates: drop old name_1 index + set gender='M' on null docs
+    try {
+      const col = mongoose.connection.collection('leveltemplates');
+      const indexes = await col.indexes();
+      for (const idx of indexes) {
+        if ((idx.name === 'name_1' || idx.name === 'name_1_gender_1') && idx.unique) {
+          await col.dropIndex(idx.name);
+          console.log(`[migration] Dropped legacy unique index: ${idx.name}`);
+        }
+      }
+      const result = await col.updateMany({ gender: null }, { $set: { gender: 'M' } });
+      if (result.modifiedCount > 0) {
+        console.log(`[migration] Set gender='M' on ${result.modifiedCount} legacy level template(s)`);
+      }
+    } catch (err: any) {
+      if (err?.codeName !== 'IndexNotFound') console.warn('[migration] levelTemplates:', err?.message);
     }
   });
 

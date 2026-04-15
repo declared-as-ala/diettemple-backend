@@ -51,6 +51,7 @@ export interface ILevelTemplate extends Document {
   description?: string;
   imageUrl?: string;
   isActive: boolean;
+  gender?: 'M' | 'F' | null;
   weeks: IWeekTemplate[];
   createdAt: Date;
   updatedAt: Date;
@@ -72,7 +73,8 @@ const defaultWeeks = (): IWeekTemplate[] =>
 
 const LevelTemplateSchema = new Schema(
   {
-    name: { type: String, required: true, trim: true, unique: true, index: true },
+    name: { type: String, required: true, trim: true, index: true },
+    gender: { type: String, enum: ['M', 'F'], default: 'M' },
     description: { type: String },
     imageUrl: { type: String },
     isActive: { type: Boolean, default: true, index: true },
@@ -96,5 +98,7 @@ const LevelTemplateSchema = new Schema(
   },
   { timestamps: true }
 );
+
+LevelTemplateSchema.index({ name: 1, gender: 1 });
 
 export default mongoose.model<ILevelTemplate>('LevelTemplate', LevelTemplateSchema);

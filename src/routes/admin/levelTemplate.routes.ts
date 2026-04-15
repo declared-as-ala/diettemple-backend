@@ -96,14 +96,21 @@ router.post(
     body('description').optional().isString(),
     body('imageUrl').optional().isString(),
     body('isActive').optional().isBoolean(),
+    body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
+      const gender = req.body.gender ?? 'M';
+      const existing = await LevelTemplate.findOne({ name: req.body.name, gender });
+      if (existing) {
+        return res.status(409).json({ message: `Un template "${req.body.name}" (${gender}) existe déjà.` });
+      }
       const plan = await LevelTemplate.create({
         name: req.body.name,
         description: req.body.description,
         imageUrl: req.body.imageUrl,
         isActive: req.body.isActive !== false,
+        gender,
       });
       res.status(201).json({ levelTemplate: plan.toObject() });
     } catch (err: unknown) {
@@ -115,7 +122,10 @@ router.post(
 // PUT /level-templates/:id
 router.put(
   '/:id',
-  [param('id').isMongoId()],
+  [
+    param('id').isMongoId(),
+    body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
+  ],
   async (req: AuthRequest, res: Response) => {
     try {
       const plan = await LevelTemplate.findById(req.params.id);
@@ -126,6 +136,7 @@ router.put(
       if (req.body.description != null) plan.description = req.body.description;
       if (req.body.imageUrl !== undefined) plan.imageUrl = req.body.imageUrl;
       if (req.body.isActive != null) plan.isActive = req.body.isActive;
+      if (req.body.gender !== undefined) plan.gender = req.body.gender;
       await plan.save();
       res.json({ levelTemplate: plan.toObject() });
     } catch (err: unknown) {

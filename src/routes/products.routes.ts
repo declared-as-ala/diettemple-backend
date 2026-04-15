@@ -7,7 +7,7 @@ import Favorite from '../models/Favorite.model';
 const router = Router();
 
 // List card fields only — keeps serverless response fast
-const LIST_SELECT = 'name brand category price discount images stock isFeatured createdAt';
+const LIST_SELECT = 'name brand category price discount uhPrice isUhExclusive images stock isFeatured createdAt';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 24;

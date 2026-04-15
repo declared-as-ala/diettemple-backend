@@ -15,6 +15,9 @@ import AuditLog from '../../models/AuditLog.model';
 import Program from '../../models/Program.model';
 import WeeklyTemplate from '../../models/WeeklyTemplate.model';
 import DailyProgram from '../../models/DailyProgram.model';
+import Order from '../../models/Order.model';
+import ExerciseHistory from '../../models/ExerciseHistory.model';
+import Exercise from '../../models/Exercise.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
 
 const router = Router();
@@ -34,7 +37,7 @@ function countWeekSessions(week: { days: Record<string, unknown[]> }): number {
 router.get(
   '/',
   [
-    query('segment').optional().isIn(['all', 'active', 'expired', 'expiring_soon', 'inactive', 'unassigned']),
+    query('segment').optional().isIn(['all', 'active', 'expired', 'expiring_soon', 'unassigned']),
     query('search').optional().isString(),
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
@@ -46,6 +49,7 @@ router.get(
       const skip = (page - 1) * limit;
       const segment = (req.query.segment as string) || 'all';
       const search = (req.query.search as string) || '';
+      const nowDate = new Date();
 
       const userFilter: Record<string, unknown> = { role: { $ne: 'admin' } };
       if (search) {
@@ -57,7 +61,7 @@ router.get(
       }
 
       const [users, subscriptions, lastWorkoutByUser] = await Promise.all([
-        User.find(userFilter).select('name email phone createdAt').sort({ name: 1 }).lean(),
+        User.find(userFilter).select('name email phone createdAt photoUri').sort({ name: 1 }).lean(),
         Subscription.find({}).populate('levelTemplateId', 'name').lean(),
         WorkoutSession.aggregate([
           { $match: { status: 'completed' } },
@@ -75,19 +79,17 @@ router.get(
       lastWorkoutByUser.forEach((x: any) => lastWorkout.set(x._id.toString(), x.lastDate));
 
       const expiringEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      const inactiveSince = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
       let list = users.map((u: any) => {
         const uid = u._id.toString();
         const sub = subByUser.get(uid);
         const eff = sub ? effectiveStatus(sub) : 'unassigned';
         const lastW = lastWorkout.get(uid);
-        const isInactive = sub && eff === 'ACTIVE' && (!lastW || new Date(lastW) < inactiveSince);
         return {
           _id: uid,
           name: u.name,
           email: u.email,
           phone: u.phone,
+          photoUri: u.photoUri || null,
           createdAt: u.createdAt,
           subscription: sub
             ? {
@@ -102,9 +104,7 @@ router.get(
             : null,
           lastWorkoutDate: lastW || null,
           segment: sub
-            ? isInactive
-              ? 'inactive'
-              : eff === 'ACTIVE' && sub.endAt >= now && sub.endAt <= expiringEnd
+            ? eff === 'ACTIVE' && sub.endAt >= nowDate && sub.endAt <= expiringEnd
                 ? 'expiring_soon'
                 : eff === 'ACTIVE'
                   ? 'active'
@@ -353,6 +353,36 @@ router.put(
   }
 );
 
+// PUT /:id/nutrition-target — set direct nutrition targets on the client (no template required)
+router.put(
+  '/:id/nutrition-target',
+  [
+    param('id').isMongoId(),
+    body('dailyCalories').optional().isInt({ min: 0 }),
+    body('proteinG').optional().isInt({ min: 0 }),
+    body('carbsG').optional().isInt({ min: 0 }),
+    body('fatG').optional().isInt({ min: 0 }),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
+      const userId = req.params.id;
+      const { dailyCalories, proteinG, carbsG, fatG } = req.body;
+      const target: Record<string, number> = {};
+      if (dailyCalories != null) target['nutritionTarget.dailyCalories'] = Number(dailyCalories);
+      if (proteinG != null) target['nutritionTarget.proteinG'] = Number(proteinG);
+      if (carbsG != null) target['nutritionTarget.carbsG'] = Number(carbsG);
+      if (fatG != null) target['nutritionTarget.fatG'] = Number(fatG);
+      const user = await User.findByIdAndUpdate(userId, { $set: target }, { new: true }).select('-passwordHash -otp -otpExpires').lean();
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      res.json({ nutritionTarget: (user as any).nutritionTarget || {} });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
+
 // GET /:id/nutrition — assignment + recent logs
 router.get(
   '/:id/nutrition',
@@ -457,6 +487,115 @@ router.get(
 );
 
 // GET /:id/analytics — client analytics (must be before GET /:id)
+router.get(
+  '/:id/orders',
+  [param('id').isMongoId(), query('limit').optional().isInt({ min: 1, max: 100 })],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const limit = parseInt((req.query.limit as string) || '25');
+      const user = await User.findById(userId).select('_id').lean();
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const orders = await Order.find({ userId })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .select('reference status paymentStatus paymentMethod totalPrice subtotal discount deliveryFee createdAt updatedAt')
+        .lean();
+
+      const summaryAgg = await Order.aggregate([
+        { $match: { userId: user._id } },
+        {
+          $group: {
+            _id: null,
+            totalOrders: { $sum: 1 },
+            paidOrders: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'PAID'] }, 1, 0] } },
+            totalSpent: {
+              $sum: {
+                $cond: [
+                  {
+                    $or: [
+                      { $eq: ['$paymentStatus', 'PAID'] },
+                      { $in: ['$status', ['paid', 'confirmed', 'shipped', 'delivered']] },
+                    ],
+                  },
+                  '$totalPrice',
+                  0,
+                ],
+              },
+            },
+            lastOrderAt: { $max: '$createdAt' },
+          },
+        },
+      ]);
+
+      const summary = summaryAgg[0] || {
+        totalOrders: 0,
+        paidOrders: 0,
+        totalSpent: 0,
+        lastOrderAt: null,
+      };
+
+      res.json({ orders, summary });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
+
+router.get(
+  '/:id/exercise-load-history',
+  [param('id').isMongoId(), query('limit').optional().isInt({ min: 1, max: 100 })],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const limit = parseInt((req.query.limit as string) || '50');
+
+      const histories = await ExerciseHistory.find({ userId })
+        .sort({ updatedAt: -1 })
+        .limit(limit)
+        .lean();
+
+      const exerciseIds = histories
+        .map((h: any) => h.exerciseId?.toString?.() || h.exerciseId)
+        .filter(Boolean);
+
+      const exercises = await Exercise.find({ _id: { $in: exerciseIds } })
+        .select('name muscleGroup')
+        .lean();
+      const exerciseNameById = new Map<string, { name: string; muscleGroup?: string }>();
+      exercises.forEach((e: any) => {
+        exerciseNameById.set(e._id.toString(), { name: e.name, muscleGroup: e.muscleGroup });
+      });
+
+      const grouped = histories.map((h: any) => {
+        const exId = h.exerciseId?.toString?.() || h.exerciseId;
+        const ex = exerciseNameById.get(String(exId));
+        return {
+          exerciseId: exId,
+          exerciseName: ex?.name || 'Exercice',
+          muscleGroup: ex?.muscleGroup || null,
+          lastWeight: h.lastWeight ?? 0,
+          lastReps: h.lastReps ?? [],
+          lastCompletedAt: h.lastCompletedAt ?? null,
+          totalVolume: h.totalVolume ?? 0,
+          progressionStatus: h.progressionStatus ?? 'stable',
+          sets: (h.lastSets || []).map((s: any) => ({
+            setNumber: s.setNumber ?? 0,
+            weightKg: s.weight ?? 0,
+            reps: s.reps ?? 0,
+            completed: !!s.completed,
+            completedAt: s.completedAt ?? null,
+          })),
+        };
+      });
+
+      res.json({ items: grouped });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
+
 router.get(
   '/:id/analytics',
   [param('id').isMongoId()],
@@ -580,6 +719,47 @@ router.get(
         WorkoutSession.findOne({ userId, status: 'completed' }).sort({ date: -1 }).select('date').lean(),
       ]);
       if (!user) return res.status(404).json({ message: 'User not found' });
+      const ordersSummaryAgg = await Order.aggregate([
+        { $match: { userId: user._id } },
+        {
+          $group: {
+            _id: null,
+            totalOrders: { $sum: 1 },
+            paidOrders: { $sum: { $cond: [{ $eq: ['$paymentStatus', 'PAID'] }, 1, 0] } },
+            totalSpent: {
+              $sum: {
+                $cond: [
+                  {
+                    $or: [
+                      { $eq: ['$paymentStatus', 'PAID'] },
+                      { $in: ['$status', ['paid', 'confirmed', 'shipped', 'delivered']] },
+                    ],
+                  },
+                  '$totalPrice',
+                  0,
+                ],
+              },
+            },
+            lastOrderAt: { $max: '$createdAt' },
+          },
+        },
+      ]);
+      const ordersSummary = ordersSummaryAgg[0] || {
+        totalOrders: 0,
+        paidOrders: 0,
+        totalSpent: 0,
+        lastOrderAt: null,
+      };
+      const ageNumeric = Number((user as any).age);
+      const profileCompletion = {
+        hasName: !!(user as any).name,
+        hasPhoto: !!(user as any).photoUri,
+        hasSexe: !!(user as any).sexe,
+        hasAge: !!(user as any).age,
+        hasTaille: !!(user as any).taille,
+        hasPoids: !!(user as any).poids,
+        hasEmailOrPhone: !!((user as any).email || (user as any).phone),
+      };
       const eff = sub ? effectiveStatus(sub as any) : null;
       const setupChecklist = {
         subscription: !!sub && eff === 'ACTIVE',
@@ -593,6 +773,17 @@ router.get(
         nutritionAssignment: nutritionAssignment || null,
         lastCoachNote: lastNote || null,
         lastWorkoutDate: (lastWorkout as any)?.date || null,
+        profileMeta: {
+          photoUri: (user as any).photoUri || null,
+          sexe: (user as any).sexe || null,
+          age: (user as any).age || null,
+          ageValue: Number.isFinite(ageNumeric) ? ageNumeric : null,
+          taille: (user as any).taille || null,
+          poids: (user as any).poids || null,
+          objectif: (user as any).objectif || null,
+          profileCompletion,
+        },
+        commerceSummary: ordersSummary,
         setupChecklist,
       });
     } catch (e: unknown) {
