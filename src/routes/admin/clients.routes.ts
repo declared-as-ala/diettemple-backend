@@ -550,14 +550,50 @@ router.get(
       const userId = req.params.id;
       const limit = parseInt((req.query.limit as string) || '50');
 
+      const workoutSessions = await WorkoutSession.find({ userId, status: 'completed' })
+        .sort({ date: -1 })
+        .limit(80)
+        .select('date completedAt exercises')
+        .lean();
+
       const histories = await ExerciseHistory.find({ userId })
         .sort({ updatedAt: -1 })
         .limit(limit)
         .lean();
 
-      const exerciseIds = histories
-        .map((h: any) => h.exerciseId?.toString?.() || h.exerciseId)
-        .filter(Boolean);
+      const historyByExercise = new Map<string, any>();
+      const exerciseIdSet = new Set<string>();
+      histories.forEach((h: any) => {
+        const exId = h.exerciseId?.toString?.() || h.exerciseId;
+        if (!exId) return;
+        exerciseIdSet.add(String(exId));
+        historyByExercise.set(String(exId), h);
+      });
+
+      const sessionsByExercise = new Map<string, Array<any>>();
+      workoutSessions.forEach((session: any) => {
+        (session.exercises || []).forEach((exerciseSession: any) => {
+          const exId = exerciseSession.exerciseId?.toString?.() || exerciseSession.exerciseId;
+          if (!exId) return;
+          const key = String(exId);
+          exerciseIdSet.add(key);
+          const normalizedSets = (exerciseSession.sets || []).map((s: any) => ({
+            setNumber: s.setNumber ?? 0,
+            weightKg: s.weight ?? 0,
+            reps: s.repsCompleted ?? s.reps ?? 0,
+            completed: !!s.completed,
+            completedAt: s.completedAt ?? null,
+          }));
+          if (!sessionsByExercise.has(key)) sessionsByExercise.set(key, []);
+          sessionsByExercise.get(key)!.push({
+            sessionDate: session.date ?? null,
+            completedAt: session.completedAt ?? null,
+            sets: normalizedSets,
+          });
+        });
+      });
+
+      const exerciseIds = Array.from(exerciseIdSet);
 
       const exercises = await Exercise.find({ _id: { $in: exerciseIds } })
         .select('name muscleGroup')
@@ -567,26 +603,31 @@ router.get(
         exerciseNameById.set(e._id.toString(), { name: e.name, muscleGroup: e.muscleGroup });
       });
 
-      const grouped = histories.map((h: any) => {
-        const exId = h.exerciseId?.toString?.() || h.exerciseId;
+      const grouped = exerciseIds.map((exId) => {
+        const h = historyByExercise.get(String(exId));
         const ex = exerciseNameById.get(String(exId));
         return {
           exerciseId: exId,
           exerciseName: ex?.name || 'Exercice',
           muscleGroup: ex?.muscleGroup || null,
-          lastWeight: h.lastWeight ?? 0,
-          lastReps: h.lastReps ?? [],
-          lastCompletedAt: h.lastCompletedAt ?? null,
-          totalVolume: h.totalVolume ?? 0,
-          progressionStatus: h.progressionStatus ?? 'stable',
-          sets: (h.lastSets || []).map((s: any) => ({
+          lastWeight: h?.lastWeight ?? 0,
+          lastReps: h?.lastReps ?? [],
+          lastCompletedAt: h?.lastCompletedAt ?? null,
+          totalVolume: h?.totalVolume ?? 0,
+          progressionStatus: h?.progressionStatus ?? 'stable',
+          sets: (h?.lastSets || []).map((s: any) => ({
             setNumber: s.setNumber ?? 0,
             weightKg: s.weight ?? 0,
             reps: s.reps ?? 0,
             completed: !!s.completed,
             completedAt: s.completedAt ?? null,
           })),
+          sessions: sessionsByExercise.get(String(exId)) || [],
         };
+      }).sort((a, b) => {
+        const ad = a.lastCompletedAt ? new Date(a.lastCompletedAt).getTime() : 0;
+        const bd = b.lastCompletedAt ? new Date(b.lastCompletedAt).getTime() : 0;
+        return bd - ad;
       });
 
       res.json({ items: grouped });

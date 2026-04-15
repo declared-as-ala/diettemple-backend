@@ -17,6 +17,7 @@ import Food from '../models/Food.model';
 import RecipeFavorite from '../models/RecipeFavorite.model';
 import User from '../models/User.model';
 import ClientPlanOverride from '../models/ClientPlanOverride.model';
+import ExerciseHistory from '../models/ExerciseHistory.model';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -886,6 +887,76 @@ router.delete('/recipes/favorites/:id', [param('id').isMongoId()], async (req: A
     res.status(500).json({ message: (e as Error).message });
   }
 });
+
+// POST /api/me/workout/exercise-history/upsert — persist latest set history immediately
+router.post(
+  '/workout/exercise-history/upsert',
+  [
+    body('exerciseId').isMongoId().withMessage('exerciseId is required'),
+    body('sets').isArray({ min: 1 }).withMessage('sets must be a non-empty array'),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.user?._id;
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
+
+      const {
+        exerciseId,
+        sets = [],
+      }: {
+        exerciseId: string;
+        sets: Array<{ setNumber?: number; reps?: number; weightKg?: number; completedAt?: string }>;
+      } = req.body;
+
+      const normalizedSets = sets
+        .map((s, idx) => ({
+          setNumber: s.setNumber ?? idx + 1,
+          weight: Number(s.weightKg ?? 0),
+          reps: Number(s.reps ?? 0),
+          completed: true,
+          completedAt: s.completedAt ? new Date(s.completedAt) : new Date(),
+        }))
+        .filter((s) => Number.isFinite(s.weight) && Number.isFinite(s.reps));
+
+      if (normalizedSets.length === 0) {
+        return res.status(400).json({ message: 'No valid sets provided' });
+      }
+
+      const lastSet = normalizedSets[normalizedSets.length - 1];
+      const totalVolume = normalizedSets.reduce((sum, s) => sum + s.reps * s.weight, 0);
+
+      const history = await ExerciseHistory.findOneAndUpdate(
+        { userId, exerciseId },
+        {
+          $set: {
+            lastWeight: lastSet.weight,
+            lastReps: normalizedSets.map((s) => s.reps),
+            lastSets: normalizedSets,
+            lastCompletedAt: new Date(),
+            totalVolume,
+            progressionStatus: 'stable',
+          },
+        },
+        { upsert: true, new: true }
+      );
+
+      res.json({
+        success: true,
+        history: {
+          exerciseId: history.exerciseId,
+          lastWeight: history.lastWeight,
+          lastReps: history.lastReps,
+          lastCompletedAt: history.lastCompletedAt,
+          totalVolume: history.totalVolume,
+        },
+      });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
 
 // POST /api/me/workout/session/complete — save a completed workout session from mobile
 router.post(
