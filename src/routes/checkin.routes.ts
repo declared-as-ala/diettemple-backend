@@ -63,6 +63,12 @@ const uploadPhoto = multer({
   },
 });
 
+/** True when ops want to force re-verification on every session start (QA/testing). */
+function isForceEveryTime(): boolean {
+  const raw = (process.env.GYM_CHECKIN_FORCE_EVERY_TIME || '').toLowerCase().trim();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 /** GET /api/checkin/gym/status?dateKey=YYYY-MM-DD — once per day: verified if any check-in for user+dateKey */
 router.get(
   '/gym/status',
@@ -71,10 +77,16 @@ router.get(
     try {
       const err = validationResult(req);
       if (!err.isEmpty()) return res.status(400).json({ message: err.array()[0].msg });
+      // TEMP flag for QA: bypass the once-per-day cache so every training entry re-prompts.
+      // Unset GYM_CHECKIN_FORCE_EVERY_TIME to restore the original behaviour.
+      if (isForceEveryTime()) {
+        console.log('[checkin/gym-status] force-every-time flag active — returning verified=false');
+        return res.json({ verified: false, verifiedAt: null, proofUrl: null });
+      }
       const userId = req.user!._id!;
       const dateKey = (req.query.dateKey as string) || getDateKeyLocal();
       const checkin = await GymCheckin.findOne({ userId, dateKey }).lean();
-      res.json({
+      return res.json({
         verified: !!checkin,
         verifiedAt: (checkin as any)?.verifiedAt || null,
         proofUrl: (checkin as any)?.proofUrl || null,
@@ -166,35 +178,40 @@ router.post(
       clearAttemptCount(userId, dateKey);
       const relativePath = path.relative(getStoragePublicRoot(), req.file.path).replace(/\\/g, '/');
       const proofUrl = toPublicUrl(relativePath);
-      const checkin = await GymCheckin.findOneAndUpdate(
-        { userId, dateKey },
-        {
-          $set: {
-            userId,
-            dateKey,
-            ...(sessionId ? { sessionId } : {}),
-            verifiedAt: new Date(),
-            proofType: 'photo',
-            proofUrl,
-            deviceInfo: req.body.deviceInfo,
-            aiScore: verify.aiScore,
-            gpsDistance: verify.gpsDistance,
-            method: 'photo',
-          },
-        },
-        { upsert: true, new: true, lean: true }
-      );
+      const forceEveryTime = isForceEveryTime();
+      const checkin = forceEveryTime
+        ? null
+        : await GymCheckin.findOneAndUpdate(
+            { userId, dateKey },
+            {
+              $set: {
+                userId,
+                dateKey,
+                ...(sessionId ? { sessionId } : {}),
+                verifiedAt: new Date(),
+                proofType: 'photo',
+                proofUrl,
+                deviceInfo: req.body.deviceInfo,
+                aiScore: verify.aiScore,
+                gpsDistance: verify.gpsDistance,
+                method: 'photo',
+              },
+            },
+            { upsert: true, new: true, lean: true }
+          );
       console.log('[checkin/gym] ACCEPTED', {
         userId,
         dateKey,
         aiScore: verify.aiScore,
         gpsDistance: verify.gpsDistance,
         acceptedReason: 'gym scene',
+        forceEveryTime,
       });
       return res.status(201).json({
         verified: true,
-        checkinId: (checkin as any)?._id,
-        verifiedAt: (checkin as any)?.verifiedAt,
+        checkinId: (checkin as any)?._id ?? null,
+        verifiedAt: (checkin as any)?.verifiedAt ?? new Date().toISOString(),
+        forceEveryTime,
       });
     } catch (e: unknown) {
       if (req.file?.path && fs.existsSync(req.file.path)) {
