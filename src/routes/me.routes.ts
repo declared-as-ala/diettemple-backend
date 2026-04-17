@@ -18,6 +18,8 @@ import RecipeFavorite from '../models/RecipeFavorite.model';
 import User from '../models/User.model';
 import ClientPlanOverride from '../models/ClientPlanOverride.model';
 import ExerciseHistory from '../models/ExerciseHistory.model';
+import WorkoutSession from '../models/WorkoutSession.model';
+import LevelHomeContent from '../models/LevelHomeContent.model';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -701,6 +703,124 @@ function dateToKeyUtc(d: Date): string {
   const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+function toLevelSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function getWeekRangeUtc(now: Date): { weekStart: Date; weekEnd: Date } {
+  const weekStartMs = utcMondayStartOfWeekContaining(now);
+  const weekStart = new Date(weekStartMs);
+  const weekEnd = new Date(weekStartMs + 7 * MS_PER_DAY - 1);
+  return { weekStart, weekEnd };
+}
+
+// GET /api/me/home/weekly-summary
+router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const now = new Date();
+    const { weekStart, weekEnd } = getWeekRangeUtc(now);
+
+    const sub = await Subscription.findOne({
+      userId,
+      status: 'ACTIVE',
+      endAt: { $gt: now },
+    }).populate('levelTemplateId');
+
+    let planned = 0;
+    let levelName: string | null = null;
+    let levelSlug: string | null = null;
+
+    if (sub) {
+      const level = (sub as any).levelTemplateId as any;
+      if (level?._id) {
+        levelName = level?.name ?? null;
+        levelSlug = levelName ? toLevelSlug(levelName) : null;
+
+        const planAnchorMs = utcMondayStartOfWeekContaining(new Date((sub as any).startAt));
+        const nowUtcMs = utcStartOfCalendarDate(now);
+        const diffDays = Math.floor((nowUtcMs - planAnchorMs) / MS_PER_DAY);
+        const weekNumber = Math.min(5, Math.max(1, Math.floor(diffDays / 7) + 1));
+
+        const levelDoc = await LevelTemplate.findById(level._id).lean();
+        const targetWeek = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
+        if (targetWeek?.days) {
+          planned =
+            (targetWeek.days.mon?.length ?? 0) +
+            (targetWeek.days.tue?.length ?? 0) +
+            (targetWeek.days.wed?.length ?? 0) +
+            (targetWeek.days.thu?.length ?? 0) +
+            (targetWeek.days.fri?.length ?? 0) +
+            (targetWeek.days.sat?.length ?? 0) +
+            (targetWeek.days.sun?.length ?? 0);
+        }
+      }
+    }
+
+    const completed = await WorkoutSession.countDocuments({
+      userId,
+      status: 'completed',
+      date: { $gte: weekStart, $lte: weekEnd },
+    });
+
+    const nutritionAgg = await DailyNutritionLog.aggregate([
+      {
+        $match: {
+          userId,
+          date: { $gte: weekStart, $lte: weekEnd },
+          status: 'complete',
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          completeDays: { $sum: 1 },
+          totalCalories: { $sum: { $ifNull: ['$consumedCalories', 0] } },
+        },
+      },
+    ]);
+
+    const weeklyNutrition = nutritionAgg[0] || { completeDays: 0, totalCalories: 0 };
+    const levelHomeContentDoc = levelSlug
+      ? await LevelHomeContent.findOne({ levelSlug, isActive: true }).lean()
+      : null;
+
+    res.json({
+      weekRange: {
+        startDate: dateToKeyUtc(weekStart),
+        endDate: dateToKeyUtc(new Date(weekEnd)),
+      },
+      weeklySessions: {
+        completed,
+        planned,
+      },
+      weeklyNutrition: {
+        completeDays: Number(weeklyNutrition.completeDays || 0),
+        totalCalories: Number(weeklyNutrition.totalCalories || 0),
+      },
+      level: {
+        name: levelName,
+        slug: levelSlug,
+      },
+      levelHomeContent: levelHomeContentDoc
+        ? {
+            title: (levelHomeContentDoc as any).title || '',
+            instructions: (levelHomeContentDoc as any).instructions || '',
+            videoUrl: (levelHomeContentDoc as any).videoUrl || '',
+          }
+        : null,
+    });
+  } catch (e: unknown) {
+    res.status(500).json({ message: (e as Error).message });
+  }
+});
 
 // GET /api/me/plan/week?weekNumber=1..5 — Mon–Sun weeks anchored to Monday of subscription week (same as /me/today)
 router.get(

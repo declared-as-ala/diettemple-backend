@@ -15,6 +15,7 @@ import Exercise from '../models/Exercise.model';
 import WeeklyTemplate from '../models/WeeklyTemplate.model';
 import SessionExerciseConfig from '../models/SessionExerciseConfig.model';
 import DailyProgram from '../models/DailyProgram.model';
+import LevelHomeContent from '../models/LevelHomeContent.model';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { getStoragePublicRoot, toPublicUrl, sanitizeSegment, publicUrlToFsPath } from '../lib/mediaStorage';
 import levelTemplateRoutes from './admin/levelTemplate.routes';
@@ -28,6 +29,15 @@ import clientsRoutes from './admin/clients.routes';
 import recipesRoutes from './admin/recipes.routes';
 
 const router = Router();
+const LEVEL_SLUG_REGEX = /^[a-z0-9-]+$/;
+
+function toLevelSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 // Coaching
 router.use('/level-templates', levelTemplateRoutes);
@@ -102,6 +112,58 @@ const asyncHandler = (fn: Function) => {
 };
 
 // ==================== PRODUCTS MANAGEMENT ====================
+
+// ==================== LEVEL HOME CONTENT ====================
+
+// GET /admin/level-home-content
+router.get('/level-home-content', async (req: AuthRequest, res: Response) => {
+  try {
+    const items = await LevelHomeContent.find().sort({ levelSlug: 1 }).lean();
+    res.json({ items });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// PUT /admin/level-home-content/:levelSlug
+router.put(
+  '/level-home-content/:levelSlug',
+  [
+    param('levelSlug')
+      .matches(LEVEL_SLUG_REGEX)
+      .withMessage('levelSlug must contain only lowercase letters, numbers and hyphens'),
+    body('title').optional().isString(),
+    body('instructions').optional().isString(),
+    body('videoUrl').optional({ nullable: true }).isString(),
+    body('isActive').optional().isBoolean(),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
+      const levelSlug = toLevelSlug(req.params.levelSlug);
+      const updates = {
+        title: typeof req.body.title === 'string' ? req.body.title.trim() : '',
+        instructions: typeof req.body.instructions === 'string' ? req.body.instructions.trim() : '',
+        videoUrl: typeof req.body.videoUrl === 'string' ? req.body.videoUrl.trim() : '',
+        isActive: typeof req.body.isActive === 'boolean' ? req.body.isActive : true,
+      };
+
+      const item = await LevelHomeContent.findOneAndUpdate(
+        { levelSlug },
+        { $set: updates },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).lean();
+
+      res.json({ item });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
 
 // GET /admin/products - Get all products with pagination
 router.get(
