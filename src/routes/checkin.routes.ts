@@ -80,7 +80,9 @@ router.get(
         proofUrl: (checkin as any)?.proofUrl || null,
       });
     } catch (e: unknown) {
-      res.status(500).json({ message: (e as Error).message });
+      console.error('[checkin/gym-status] UNHANDLED', (e as Error)?.stack || e);
+      if (res.headersSent) return;
+      return res.status(500).json({ message: (e as Error).message });
     }
   }
 );
@@ -164,7 +166,7 @@ router.post(
       clearAttemptCount(userId, dateKey);
       const relativePath = path.relative(getStoragePublicRoot(), req.file.path).replace(/\\/g, '/');
       const proofUrl = toPublicUrl(relativePath);
-      await GymCheckin.findOneAndUpdate(
+      const checkin = await GymCheckin.findOneAndUpdate(
         { userId, dateKey },
         {
           $set: {
@@ -180,18 +182,30 @@ router.post(
             method: 'photo',
           },
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true, lean: true }
       );
-      const checkin = await GymCheckin.findOne({ userId, dateKey }).lean();
-      console.log('[checkin/gym] ACCEPTED', { userId, dateKey, aiScore: verify.aiScore, gpsDistance: verify.gpsDistance, acceptedReason: 'gym scene' });
-      res.status(201).json({
+      console.log('[checkin/gym] ACCEPTED', {
+        userId,
+        dateKey,
+        aiScore: verify.aiScore,
+        gpsDistance: verify.gpsDistance,
+        acceptedReason: 'gym scene',
+      });
+      return res.status(201).json({
         verified: true,
         checkinId: (checkin as any)?._id,
         verifiedAt: (checkin as any)?.verifiedAt,
       });
     } catch (e: unknown) {
-      if (req.file?.path && fs.existsSync(req.file.path)) try { fs.unlinkSync(req.file.path); } catch (_) {}
-      res.status(500).json({ message: (e as Error).message });
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
+      console.error('[checkin/gym] UNHANDLED', (e as Error)?.stack || e);
+      if (res.headersSent) return;
+      return res.status(500).json({
+        message: 'Erreur interne du serveur. Réessaie.',
+        code: 'GYM_VERIFY_SERVER_ERROR',
+      });
     }
   }
 );
