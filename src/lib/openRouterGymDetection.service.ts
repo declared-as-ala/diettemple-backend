@@ -2,25 +2,56 @@
  * Gym presence detection via OpenRouter API.
  * Gemma-safe: no system/developer messages — all instructions in a single user message.
  * Fallback chain + 429 retry + safe JSON parsing. Never throws; returns safe result if all models fail.
+ *
+ * Caller (gymVerify.ts) is expected to fall back to the local CLIP/MobileNet
+ * classifier when this returns `model: 'none'` so production never breaks when
+ * OpenRouter free-tier model IDs rotate or rate-limit.
  */
 
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 
-/** Free vision models — tried in order until one succeeds. */
-const GYM_MODELS = [
-  'google/gemma-3-4b-it:free',
-  'google/gemma-3-12b-it:free',
+/**
+ * Free vision models — tried in order until one succeeds.
+ * Override at runtime with OPENROUTER_GYM_MODELS_JSON=[ "provider/model:free", ... ].
+ * Free-tier IDs rotate; keep this list large and allow ops to patch without redeploy.
+ */
+const DEFAULT_GYM_MODELS = [
+  'google/gemini-2.0-flash-exp:free',
+  'meta-llama/llama-3.2-11b-vision-instruct:free',
+  'qwen/qwen2.5-vl-72b-instruct:free',
+  'qwen/qwen2.5-vl-32b-instruct:free',
   'google/gemma-3-27b-it:free',
+  'google/gemma-3-12b-it:free',
+  'google/gemma-3-4b-it:free',
   'mistralai/mistral-small-3.1-24b-instruct:free',
   'nvidia/nemotron-nano-12b-v2-vl:free',
 ];
 
-const REQUEST_TIMEOUT_MS = 15_000;
+function loadModels(): string[] {
+  const raw = process.env.OPENROUTER_GYM_MODELS_JSON;
+  if (raw) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.every((x) => typeof x === 'string')) return arr;
+    } catch {
+      /* fall through */
+    }
+  }
+  return DEFAULT_GYM_MODELS;
+}
+
+const GYM_MODELS = loadModels();
+
+const REQUEST_TIMEOUT_MS = parseInt(process.env.OPENROUTER_TIMEOUT_MS || '15000', 10) || 15_000;
 const RETRY_DELAY_MS = 1000;
+/** Max image side (px) before re-encoding for the OpenRouter payload. Keeps base64 small. */
+const MAX_IMAGE_SIDE = parseInt(process.env.OPENROUTER_MAX_IMAGE_SIDE || '1024', 10) || 1024;
+const JPEG_QUALITY = parseInt(process.env.OPENROUTER_JPEG_QUALITY || '80', 10) || 80;
 
 /** Single user-message prompt (Gemma-compatible: no system/developer). */
 const USER_PROMPT = `You are a scene classifier. Look at this image and decide if it shows a gym, fitness center, workout room, or weight room.
@@ -93,12 +124,28 @@ interface ParsedClassifierResponse {
 
 const GYM_LABELS = ['gym interior', 'fitness center', 'workout room', 'weight room'];
 
-function getBase64DataUrl(imagePath: string): string {
-  const ext = path.extname(imagePath).toLowerCase();
-  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-  const buffer = fs.readFileSync(imagePath);
-  const base64 = buffer.toString('base64');
-  return `data:${mime};base64,${base64}`;
+/**
+ * Downscale + re-encode to JPEG to keep the base64 payload small.
+ * Free-tier models often reject multi-MB images; a ~1024px JPEG is plenty for scene classification.
+ */
+async function getBase64DataUrl(imagePath: string): Promise<string> {
+  try {
+    const meta = await sharp(imagePath).metadata();
+    const w = meta.width ?? 0;
+    const h = meta.height ?? 0;
+    const maxSide = Math.max(w, h);
+    let pipeline = sharp(imagePath).rotate();
+    if (maxSide > MAX_IMAGE_SIDE) {
+      pipeline = pipeline.resize({ width: MAX_IMAGE_SIDE, height: MAX_IMAGE_SIDE, fit: 'inside' });
+    }
+    const buffer = await pipeline.jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toBuffer();
+    return `data:image/jpeg;base64,${buffer.toString('base64')}`;
+  } catch {
+    const ext = path.extname(imagePath).toLowerCase();
+    const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+    const buffer = fs.readFileSync(imagePath);
+    return `data:${mime};base64,${buffer.toString('base64')}`;
+  }
 }
 
 /** Sleep for ms + random jitter (0–30% of ms). */
@@ -266,22 +313,12 @@ function safeResult(modelResponses: Record<string, ModelResponseItem>): OpenRout
   };
 }
 
-/**
- * Classify image with OpenRouter. Tries each model in GYM_MODELS until one succeeds.
- * On 429 waits 1s before next model. Never throws; returns safe result if all fail.
- */
-export async function classifyGymSceneOpenRouter(imagePath: string): Promise<OpenRouterGymResult> {
-  const requestId = `gym-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-  if (!OPENROUTER_API_KEY) {
-    console.warn(`[OpenRouter] requestId=${requestId} OPENROUTER_API_KEY missing`);
-    return safeResult({});
-  }
-
-  console.log(`[OpenRouter] requestId=${requestId} start models=${GYM_MODELS.length}`);
-  const imageDataUrl = getBase64DataUrl(imagePath);
-  const modelResponses: Record<string, ModelResponseItem> = {};
-
+/** Single pass through the model list. Returns either a successful result or null. */
+async function tryModels(
+  imageDataUrl: string,
+  requestId: string,
+  modelResponses: Record<string, ModelResponseItem>
+): Promise<OpenRouterGymResult | null> {
   for (let i = 0; i < GYM_MODELS.length; i++) {
     const modelId = GYM_MODELS[i];
     const result = await callModel(imageDataUrl, modelId, requestId);
@@ -290,26 +327,68 @@ export async function classifyGymSceneOpenRouter(imagePath: string): Promise<Ope
 
     if (!result.success) {
       const isRateLimit = result.statusCode === 429;
-      console.warn(`[OpenRouter] requestId=${requestId} model=${modelId} failed reason=${result.error} trying_next=${i < GYM_MODELS.length - 1}`);
+      console.warn(
+        `[OpenRouter] requestId=${requestId} model=${modelId} failed status=${result.statusCode ?? 'n/a'} reason=${result.error} trying_next=${i < GYM_MODELS.length - 1}`
+      );
       if (i < GYM_MODELS.length - 1) {
         await sleepWithJitter(isRateLimit ? RETRY_DELAY_MS : 400);
         continue;
       }
-      break;
+      return null;
     }
 
     const content = result.content ?? '';
     const parsed = parseClassifierResponse(content);
     if (!parsed) {
-      console.warn(`[OpenRouter] requestId=${requestId} model=${modelId} parse_failed content_len=${content.length} preview=${content.slice(0, 200)}`);
-      if (i < GYM_MODELS.length - 1) { await sleepWithJitter(400); continue; }
-      break;
+      console.warn(
+        `[OpenRouter] requestId=${requestId} model=${modelId} parse_failed content_len=${content.length} preview=${content.slice(0, 200)}`
+      );
+      if (i < GYM_MODELS.length - 1) {
+        await sleepWithJitter(400);
+        continue;
+      }
+      return null;
     }
 
     const selected = buildResultFromParsed(parsed, modelId);
-    console.log(`[OpenRouter] requestId=${requestId} model=${modelId} label=${parsed.label} confidence=${parsed.confidence} reasonCode=${parsed.reasonCode ?? 'n/a'}`);
-    return { ...selected, modelResponses };
+    console.log(
+      `[OpenRouter] requestId=${requestId} model=${modelId} label=${parsed.label} confidence=${parsed.confidence} reasonCode=${parsed.reasonCode ?? 'n/a'}`
+    );
+    return selected;
   }
+  return null;
+}
+
+/**
+ * Classify image with OpenRouter. Tries each model in GYM_MODELS until one succeeds.
+ * On 429 waits 1s before next model. Attempts one full retry if the first pass fails
+ * (handles transient DNS/connection errors at cold start). Never throws; returns
+ * `model: 'none'` if all fail, so the caller can fall back to the local CLIP model.
+ */
+export async function classifyGymSceneOpenRouter(imagePath: string): Promise<OpenRouterGymResult> {
+  const requestId = `gym-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  if (!OPENROUTER_API_KEY) {
+    console.warn(`[OpenRouter] requestId=${requestId} OPENROUTER_API_KEY missing — set it in PM2/Vercel env`);
+    return safeResult({});
+  }
+
+  console.log(
+    `[OpenRouter] requestId=${requestId} start models=${GYM_MODELS.length} apiKeyPrefix=${OPENROUTER_API_KEY.slice(0, 8)}… timeoutMs=${REQUEST_TIMEOUT_MS}`
+  );
+  const imageDataUrl = await getBase64DataUrl(imagePath);
+  console.log(`[OpenRouter] requestId=${requestId} image_payload_bytes=${imageDataUrl.length}`);
+
+  const modelResponses: Record<string, ModelResponseItem> = {};
+
+  let attempt = await tryModels(imageDataUrl, requestId, modelResponses);
+  if (attempt) return { ...attempt, modelResponses };
+
+  // Single full retry — covers transient DNS/connection hiccups common on fresh VPS boots.
+  console.warn(`[OpenRouter] requestId=${requestId} first_pass_failed retrying_after=${RETRY_DELAY_MS}ms`);
+  await sleepWithJitter(RETRY_DELAY_MS);
+  attempt = await tryModels(imageDataUrl, `${requestId}-r2`, modelResponses);
+  if (attempt) return { ...attempt, modelResponses };
 
   return safeResult(modelResponses);
 }

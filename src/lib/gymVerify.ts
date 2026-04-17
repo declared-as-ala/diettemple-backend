@@ -1,13 +1,22 @@
 /**
  * Gym photo validation for check-in (séance Démarrer).
- * Uses the same OpenRouter AI + decision logic as profile "Verify I am at the gym" (classifyGymSceneOpenRouter + decideVerification).
- * Local checks: min size/dimensions, screenshot heuristic, too dark. Then AI + decision; on failure → provider_error.
+ *
+ * Pipeline:
+ *   1. Local image hygiene (size, dimensions, screenshot heuristic, darkness).
+ *   2. OpenRouter vision classifier (primary — high-quality VLM).
+ *   3. Local CLIP zero-shot classifier (fallback when OpenRouter is unavailable).
+ *   4. Decision layer (threshold, margin, geofence, upload source).
+ *
+ * Only returns `provider_error` when BOTH the remote and local classifiers fail
+ * (extremely rare — a true outage). This prevents the production outage where
+ * every free OpenRouter model 404/429s and the app becomes unusable.
  */
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import sharp from 'sharp';
 import { classifyGymSceneOpenRouter } from './openRouterGymDetection.service';
+import { classifyGymSceneClip } from './clipGymClassifier.service';
 import { decideVerification } from './gymVerificationDecision';
 
 const MIN_SIZE_BYTES = 200 * 1024; // 200KB
@@ -186,12 +195,41 @@ export async function validateGymPhoto(
   }
 
   try {
-    // Same OpenRouter AI + decision as profile "Verify I am at the gym"
-    const classification = await classifyGymSceneOpenRouter(pathToUse);
+    // Primary: OpenRouter VLM. Fallback: local CLIP zero-shot (works offline).
+    let classification: {
+      topPrediction: string;
+      confidence: number;
+      topPredictions: Array<{ label: string; score: number }>;
+      model: string;
+    } = await classifyGymSceneOpenRouter(pathToUse);
+
+    if (classification.model === 'none') {
+      console.warn('[gym-verify] OpenRouter unavailable — falling back to local CLIP classifier.');
+      try {
+        const local = await classifyGymSceneClip(pathToUse);
+        if (local.model && local.confidence > 0 && local.topPredictions.length > 0) {
+          classification = {
+            topPrediction: local.topPrediction,
+            confidence: local.confidence,
+            topPredictions: local.topPredictions,
+            model: `local:${local.model}`,
+          };
+          console.log(
+            '[gym-verify] Local classifier result: label=%s confidence=%s model=%s',
+            local.topPrediction,
+            local.confidence.toFixed(2),
+            local.model
+          );
+        }
+      } catch (e) {
+        console.error('[gym-verify] Local CLIP fallback failed', e);
+      }
+    }
+
     const aiScore = classification.confidence;
 
     if (classification.model === 'none') {
-      console.log('[gym-verify] REJECTED — provider_error: AI unavailable (same logic as profile verification).');
+      console.log('[gym-verify] REJECTED — provider_error: both OpenRouter and local CLIP unavailable.');
       if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       return {
         accepted: false,

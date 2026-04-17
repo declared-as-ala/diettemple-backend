@@ -126,21 +126,25 @@ router.post(
         const isProviderError = verify.reasonCode === 'provider_error';
         const nextAttemptCount = isProviderError ? getAttemptCount(userId, dateKey) : incrementAttemptCount(userId, dateKey);
         const nextAllowedMethod = nextAttemptCount >= 2 ? 'photo' as const : undefined;
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('[checkin/gym] REJECTED', {
-            reason: verify.reason,
-            reasonCode: verify.reasonCode,
-            aiScore: verify.aiScore,
-            attemptCount: nextAttemptCount,
-            isProviderError,
-          });
-        }
+        // Always log — ops need this in prod to diagnose AI provider issues.
+        console.log('[checkin/gym] REJECTED', {
+          userId,
+          dateKey,
+          reason: verify.reason,
+          reasonCode: verify.reasonCode,
+          aiScore: verify.aiScore,
+          attemptCount: nextAttemptCount,
+          isProviderError,
+        });
         if (isProviderError) {
+          res.setHeader('Retry-After', '5');
           return res.status(503).json({
             verified: false,
             message: verify.reason,
             code: 'GYM_VERIFY_FAILED',
             reason: 'provider_error',
+            retryable: true,
+            retryAfterSeconds: 5,
             tips: verify.tips ?? [],
             attemptCount: nextAttemptCount,
           });
