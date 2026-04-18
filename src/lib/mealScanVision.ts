@@ -75,8 +75,12 @@ export async function detectMealWithVision(
   let imageBuffer = validation.buffer;
   const resized = await resizeMealImageIfNeeded(imageBuffer, validation.mime);
   if (resized !== imageBuffer) imageBuffer = resized;
+  const { analyzeMealWithGroq } = await import('./mealScanGroq.service');
   const { analyzeMealWithOpenRouter } = await import('./mealScanOpenRouter.service');
-  const result = await analyzeMealWithOpenRouter(imageBuffer, validation.mime);
+  let result = await analyzeMealWithGroq(imageBuffer, validation.mime);
+  if (!result.ok) {
+    result = await analyzeMealWithOpenRouter(imageBuffer, validation.mime);
+  }
   if (!result.ok) return null;
   const lowConfidence = result.items.some((i) => i.confidence < 0.6);
   return {

@@ -21,7 +21,8 @@ const MAX_RETRIES_PER_MODEL = 1; // retry once within same model on timeout or 5
 
 const CATEGORIES = ['protein', 'carb', 'fat', 'vegetable', 'fruit', 'sauce', 'drink', 'other'] as const;
 
-const USER_PROMPT = `Analyse cette photo de repas. Liste les aliments visibles et pour CHAQUE aliment estime les macros nutritionnels (pour 100g).
+/** Shared with Groq meal vision (same JSON contract). */
+export const MEAL_VISION_USER_PROMPT = `Analyse cette photo de repas. Liste les aliments visibles et pour CHAQUE aliment estime les macros nutritionnels (pour 100g).
 
 Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après, sans markdown, sans \`\`\`.
 Structure exacte:
@@ -60,7 +61,7 @@ export interface MealDetectionItem {
 
 export interface MealDetectionSuccess {
   ok: true;
-  source: 'openrouter';
+  source: 'openrouter' | 'groq';
   items: MealDetectionItem[];
   notes: string;
 }
@@ -126,7 +127,8 @@ function validateAndNormalizeItems(raw: unknown): MealDetectionItem[] {
   return out;
 }
 
-function parseMealResponse(content: string): MealDetectionSuccess | null {
+/** Shared with Groq meal vision: parse model JSON into normalized items. */
+export function parseMealResponse(content: string, source: 'openrouter' | 'groq' = 'openrouter'): MealDetectionSuccess | null {
   const parsed = extractJsonObject<Record<string, unknown>>(content);
   if (!parsed) return null;
   // Accept common aliases: items / foods / food / aliments / results
@@ -137,13 +139,14 @@ function parseMealResponse(content: string): MealDetectionSuccess | null {
   const notes = typeof rawNotes === 'string' ? rawNotes.trim() : '';
   return {
     ok: true,
-    source: 'openrouter',
+    source,
     items,
     notes: notes || 'Détection IA. Vérifie les aliments et les quantités avant validation.',
   };
 }
 
-function getDataUrl(buffer: Buffer, mime: string): string {
+/** Shared with Groq: data URL for vision API payloads. */
+export function getMealScanImageDataUrl(buffer: Buffer, mime: string): string {
   const base64 = buffer.toString('base64');
   const m = mime === 'image/png' ? 'image/png' : mime === 'image/webp' ? 'image/webp' : 'image/jpeg';
   return `data:${m};base64,${base64}`;
@@ -174,7 +177,7 @@ export async function analyzeMealWithOpenRouter(
     };
   }
 
-  const imageDataUrl = getDataUrl(imageBuffer, mime);
+  const imageDataUrl = getMealScanImageDataUrl(imageBuffer, mime);
   const rateLimitMessage =
     'Le service d\'analyse est temporairement surchargé. Réessaye dans une minute ou ajoute les aliments manuellement.';
 
@@ -188,7 +191,7 @@ export async function analyzeMealWithOpenRouter(
         {
           role: 'user',
           content: [
-            { type: 'text', text: USER_PROMPT },
+            { type: 'text', text: MEAL_VISION_USER_PROMPT },
             { type: 'image_url', image_url: { url: imageDataUrl } },
           ],
         },
