@@ -77,19 +77,22 @@ router.get(
     try {
       const err = validationResult(req);
       if (!err.isEmpty()) return res.status(400).json({ message: err.array()[0].msg });
-      // TEMP flag for QA: bypass the once-per-day cache so every training entry re-prompts.
-      // Unset GYM_CHECKIN_FORCE_EVERY_TIME to restore the original behaviour.
-      if (isForceEveryTime()) {
-        console.log('[checkin/gym-status] force-every-time flag active — returning verified=false');
-        return res.json({ verified: false, verifiedAt: null, proofUrl: null });
-      }
       const userId = req.user!._id!;
       const dateKey = (req.query.dateKey as string) || getDateKeyLocal();
       const checkin = await GymCheckin.findOne({ userId, dateKey }).lean();
+      const forceEvery = isForceEveryTime();
+      if (forceEvery) {
+        // QA flag: still return DB truth so mobile “once per calendar day” matches POST /gym/start.
+        console.log('[checkin/gym-status] GYM_CHECKIN_FORCE_EVERY_TIME active — status from DB only', {
+          dateKey,
+          verified: !!checkin,
+        });
+      }
       return res.json({
         verified: !!checkin,
         verifiedAt: (checkin as any)?.verifiedAt || null,
         proofUrl: (checkin as any)?.proofUrl || null,
+        ...(forceEvery ? { qaForceEveryTimeActive: true } : {}),
       });
     } catch (e: unknown) {
       console.error('[checkin/gym-status] UNHANDLED', (e as Error)?.stack || e);

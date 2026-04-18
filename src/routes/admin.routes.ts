@@ -72,6 +72,7 @@ try {
 // New uploads: use writable root (tmp on Vercel, else storage/public)
 const writableRoot = isVercel ? path.join(os.tmpdir(), 'diettemple', 'public') : getStoragePublicRoot();
 const exercisesVideosRoot = path.join(writableRoot, 'exercises', 'videos');
+const levelHomeVideosRoot = path.join(writableRoot, 'level-home', 'videos');
 const videoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const id = sanitizeSegment((req as any).params?.id || 'unknown');
@@ -94,6 +95,35 @@ const videoStorage = multer.diskStorage({
 const upload = multer({
   storage: videoStorage,
   limits: { fileSize: 300 * 1024 * 1024 }, // 300MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Invalid file type. Only video files are allowed.'));
+  },
+});
+
+const levelHomeVideoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const slug = sanitizeSegment(toLevelSlug((req as any).params?.levelSlug || 'unknown'));
+    const dir = path.join(levelHomeVideosRoot, slug);
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      return cb(e as Error, dir);
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ts = Date.now();
+    const ext = (path.extname(file.originalname) || '').toLowerCase();
+    const safeExt = ext === '.mp4' || ext === '.webm' ? ext : '.mp4';
+    cb(null, `video_${ts}${safeExt}`);
+  },
+});
+
+const levelHomeVideoUpload = multer({
+  storage: levelHomeVideoStorage,
+  limits: { fileSize: 300 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'];
     if (allowed.includes(file.mimetype)) cb(null, true);
@@ -145,10 +175,25 @@ router.put(
       }
 
       const levelSlug = toLevelSlug(req.params.levelSlug);
+      const existing = await LevelHomeContent.findOne({ levelSlug }).lean();
+      const prevUrl = (existing as any)?.videoUrl as string | undefined;
+
+      const nextVideoUrl =
+        typeof req.body.videoUrl === 'string'
+          ? req.body.videoUrl.trim()
+          : String((existing as any)?.videoUrl ?? '');
+
+      if (prevUrl && prevUrl.startsWith('/media/') && nextVideoUrl === '') {
+        const oldPath = publicUrlToFsPath(prevUrl);
+        if (oldPath && fs.existsSync(oldPath)) {
+          try { fs.unlinkSync(oldPath); } catch (_) {}
+        }
+      }
+
       const updates = {
         title: typeof req.body.title === 'string' ? req.body.title.trim() : '',
         instructions: typeof req.body.instructions === 'string' ? req.body.instructions.trim() : '',
-        videoUrl: typeof req.body.videoUrl === 'string' ? req.body.videoUrl.trim() : '',
+        videoUrl: nextVideoUrl,
         isActive: typeof req.body.isActive === 'boolean' ? req.body.isActive : true,
       };
 
@@ -160,6 +205,59 @@ router.put(
 
       res.json({ item });
     } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// POST /admin/level-home-content/:levelSlug/video — upload video file (stores under /media/…)
+router.post(
+  '/level-home-content/:levelSlug/video',
+  [
+    param('levelSlug')
+      .matches(LEVEL_SLUG_REGEX)
+      .withMessage('levelSlug must contain only lowercase letters, numbers and hyphens'),
+  ],
+  levelHomeVideoUpload.single('video'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        if (req.file?.path && fs.existsSync(req.file.path)) {
+          try { fs.unlinkSync(req.file.path); } catch (_) {}
+        }
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
+      const levelSlug = toLevelSlug(req.params.levelSlug);
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'Veuillez envoyer un fichier vidéo (champ video).' });
+      }
+
+      const existing = await LevelHomeContent.findOne({ levelSlug }).lean();
+      const prevUrl = (existing as any)?.videoUrl as string | undefined;
+      if (prevUrl && prevUrl.startsWith('/media/')) {
+        const oldPath = publicUrlToFsPath(prevUrl);
+        if (oldPath && fs.existsSync(oldPath)) {
+          try { fs.unlinkSync(oldPath); } catch (_) {}
+        }
+      }
+
+      const relativePath = `level-home/videos/${sanitizeSegment(levelSlug)}/${req.file.filename}`;
+      const videoUrl = toPublicUrl(relativePath);
+
+      const item = await LevelHomeContent.findOneAndUpdate(
+        { levelSlug },
+        { $set: { videoUrl } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).lean();
+
+      res.json({ item, videoUrl, message: 'Video uploaded successfully' });
+    } catch (error: any) {
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      }
       res.status(500).json({ message: error.message });
     }
   }

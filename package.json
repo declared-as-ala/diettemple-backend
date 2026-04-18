@@ -23,6 +23,7 @@
     "seed:user1-plan": "ts-node src/scripts/seedUser1Plan.ts",
     "seed:sample-users-plans": "ts-node src/scripts/seedSampleUsersPlans.ts",
     "seed:nutrition": "ts-node src/scripts/seedNutrition.ts",
+    "seed:recipe-macros": "ts-node src/scripts/seedRecipeMacros.ts",
     "seed:user1-nutrition": "ts-node src/scripts/seedUser1Nutrition.ts",
     "seed:exercise-history": "ts-node src/scripts/seedExerciseHistory.ts",
     "seed:workout-plan": "ts-node src/scripts/seedWorkoutPlan.ts",

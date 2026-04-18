@@ -1,7 +1,7 @@
 /**
  * Gym Presence Verification API.
  * POST /api/verification/gym-presence — image + GPS + uploadSource → verified, confidence, trustLevel, etc.
- * Uses OpenRouter vision API for gym detection; geofence + decision logic; temp file cleanup.
+ * Uses Groq (when GROQ_API_KEY) then OpenRouter for gym vision; geofence + decision logic; temp file cleanup.
  */
 import { Router, Response } from 'express';
 import multer from 'multer';
@@ -11,6 +11,7 @@ import os from 'os';
 import { body, validationResult } from 'express-validator';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { classifyGymSceneOpenRouter } from '../lib/openRouterGymDetection.service';
+import { classifyGymSceneGroq } from '../lib/groqGymDetection.service';
 import { checkGeofence } from '../lib/geofence';
 import { decideVerification, type UploadSource } from '../lib/gymVerificationDecision';
 import GymPresenceVerification from '../models/GymPresenceVerification.model';
@@ -108,7 +109,10 @@ router.post(
 
       let classification;
       try {
-        classification = await classifyGymSceneOpenRouter(req.file.path);
+        classification = await classifyGymSceneGroq(req.file.path);
+        if (classification.model === 'none') {
+          classification = await classifyGymSceneOpenRouter(req.file.path);
+        }
       } catch (e: any) {
         if (filePath && fs.existsSync(filePath)) {
           try {

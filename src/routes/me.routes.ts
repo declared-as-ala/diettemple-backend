@@ -728,6 +728,11 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
     const now = new Date();
     const { weekStart, weekEnd } = getWeekRangeUtc(now);
 
+    const userDoc = await User.findById(userId).select('level').lean();
+    const userLevel = (userDoc as any)?.level as string | undefined;
+    /** Matches admin "Contenu Home" keys (Intiate, Fighter, …). */
+    const slugFromUserLevel = userLevel ? toLevelSlug(userLevel) : null;
+
     const sub = await Subscription.findOne({
       userId,
       status: 'ACTIVE',
@@ -736,13 +741,13 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
 
     let planned = 0;
     let levelName: string | null = null;
-    let levelSlug: string | null = null;
+    let slugFromTemplateName: string | null = null;
 
     if (sub) {
       const level = (sub as any).levelTemplateId as any;
       if (level?._id) {
         levelName = level?.name ?? null;
-        levelSlug = levelName ? toLevelSlug(levelName) : null;
+        slugFromTemplateName = levelName ? toLevelSlug(levelName) : null;
 
         const planAnchorMs = utcMondayStartOfWeekContaining(new Date((sub as any).startAt));
         const nowUtcMs = utcStartOfCalendarDate(now);
@@ -788,9 +793,21 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
     ]);
 
     const weeklyNutrition = nutritionAgg[0] || { completeDays: 0, totalCalories: 0 };
-    const levelHomeContentDoc = levelSlug
-      ? await LevelHomeContent.findOne({ levelSlug, isActive: true }).lean()
-      : null;
+
+    /** Prefer user tier slug (admin UI); fallback to plan template name slug. */
+    const contentLookupSlugs = [...new Set([slugFromUserLevel, slugFromTemplateName].filter(Boolean))] as string[];
+    let levelHomeContentDoc: any = null;
+    let contentMatchedSlug: string | null = null;
+    for (const s of contentLookupSlugs) {
+      const doc = await LevelHomeContent.findOne({ levelSlug: s, isActive: true }).lean();
+      if (doc) {
+        levelHomeContentDoc = doc;
+        contentMatchedSlug = s;
+        break;
+      }
+    }
+
+    const levelSlugForResponse = contentMatchedSlug ?? slugFromUserLevel ?? slugFromTemplateName;
 
     res.json({
       weekRange: {
@@ -806,8 +823,8 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
         totalCalories: Number(weeklyNutrition.totalCalories || 0),
       },
       level: {
-        name: levelName,
-        slug: levelSlug,
+        name: levelName ?? userLevel ?? null,
+        slug: levelSlugForResponse,
       },
       levelHomeContent: levelHomeContentDoc
         ? {

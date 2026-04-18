@@ -394,3 +394,13 @@ export async function classifyGymSceneOpenRouter(imagePath: string): Promise<Ope
   return safeResult(modelResponses);
 }
 
+/** Shared with Groq gym classifier: JPEG data URL for vision APIs. */
+export { getBase64DataUrl as encodeGymImageDataUrl };
+/** Shared with Groq: parse strict JSON classifier output from model text. */
+export { parseClassifierResponse };
+export function classifierParsedToOpenRouterResult(
+  parsed: NonNullable<ReturnType<typeof parseClassifierResponse>>,
+  modelId: string
+): OpenRouterGymResult {
+  return buildResultFromParsed(parsed, modelId);
+}
