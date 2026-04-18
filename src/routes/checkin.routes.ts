@@ -179,26 +179,27 @@ router.post(
       const relativePath = path.relative(getStoragePublicRoot(), req.file.path).replace(/\\/g, '/');
       const proofUrl = toPublicUrl(relativePath);
       const forceEveryTime = isForceEveryTime();
-      const checkin = forceEveryTime
-        ? null
-        : await GymCheckin.findOneAndUpdate(
-            { userId, dateKey },
-            {
-              $set: {
-                userId,
-                dateKey,
-                ...(sessionId ? { sessionId } : {}),
-                verifiedAt: new Date(),
-                proofType: 'photo',
-                proofUrl,
-                deviceInfo: req.body.deviceInfo,
-                aiScore: verify.aiScore,
-                gpsDistance: verify.gpsDistance,
-                method: 'photo',
-              },
-            },
-            { upsert: true, new: true, lean: true }
-          );
+      // Always persist the check-in so downstream endpoints (e.g. /workout/start)
+      // can validate gym presence. `forceEveryTime` only skips the /gym/status
+      // daily cache — it must NOT prevent the DB record from being written.
+      const checkin = await GymCheckin.findOneAndUpdate(
+        { userId, dateKey },
+        {
+          $set: {
+            userId,
+            dateKey,
+            ...(sessionId ? { sessionId } : {}),
+            verifiedAt: new Date(),
+            proofType: 'photo',
+            proofUrl,
+            deviceInfo: req.body.deviceInfo,
+            aiScore: verify.aiScore,
+            gpsDistance: verify.gpsDistance,
+            method: 'photo',
+          },
+        },
+        { upsert: true, new: true, lean: true }
+      );
       console.log('[checkin/gym] ACCEPTED', {
         userId,
         dateKey,
