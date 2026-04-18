@@ -19,21 +19,16 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
  * Free vision models — tried in order until one succeeds.
  * Override at runtime with OPENROUTER_GYM_MODELS_JSON=["provider/model:free", ...].
  *
- * Free-tier IDs rotate frequently. This list deliberately:
- *   - only keeps models with a vision modality (text-only Gemma entries were
- *     removed — they ignore the image and waste a 404/429 retry budget);
- *   - lists a mix of providers so a single provider outage isn't fatal;
- *   - stops early after the first successful call — see tryModels().
- *
- * If every default ID is 404/429 on your account, patch the env var without
- * redeploying: set OPENROUTER_GYM_MODELS_JSON in PM2 ecosystem + `pm2 reload`.
+ * This list MIRRORS the meal-scan service (mealScanOpenRouter.service.ts) on
+ * purpose: those are the exact free models the DietTemple OpenRouter account
+ * has access to today. If meal-scan works, gym detection works. When the
+ * free-tier IDs rotate, patch both services together (or set the env var).
  */
 const DEFAULT_GYM_MODELS = [
-  'meta-llama/llama-3.2-90b-vision-instruct:free',
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  'qwen/qwen2.5-vl-72b-instruct:free',
-  'qwen/qwen2.5-vl-32b-instruct:free',
-  'mistralai/pixtral-12b:free',
+  'google/gemma-3-4b-it:free',
+  'google/gemma-3-12b-it:free',
+  'google/gemma-3-27b-it:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
   'nvidia/nemotron-nano-12b-v2-vl:free',
 ];
 
