@@ -19,17 +19,18 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
  * Free vision models — tried in order until one succeeds.
  * Override at runtime with OPENROUTER_GYM_MODELS_JSON=["provider/model:free", ...].
  *
- * This list MIRRORS the meal-scan service (mealScanOpenRouter.service.ts) on
- * purpose: those are the exact free models the DietTemple OpenRouter account
- * has access to today. If meal-scan works, gym detection works. When the
- * free-tier IDs rotate, patch both services together (or set the env var).
+ * This list is the same free pool as the meal-scan service, but reordered:
+ * `nvidia/nemotron-nano-12b-v2-vl:free` is the only one reliably serving
+ * vision on this account today — keep it FIRST so a single 2s call satisfies
+ * the whole verify flow. Others stay as fallbacks in case Nvidia rate-limits.
+ * When the free-tier IDs rotate, update both services together.
  */
 const DEFAULT_GYM_MODELS = [
-  'google/gemma-3-4b-it:free',
-  'google/gemma-3-12b-it:free',
-  'google/gemma-3-27b-it:free',
-  'mistralai/mistral-small-3.1-24b-instruct:free',
   'nvidia/nemotron-nano-12b-v2-vl:free',
+  'google/gemma-3-27b-it:free',
+  'google/gemma-3-12b-it:free',
+  'google/gemma-3-4b-it:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
 ];
 
 function loadModels(): string[] {
@@ -47,8 +48,11 @@ function loadModels(): string[] {
 
 const GYM_MODELS = loadModels();
 
-const REQUEST_TIMEOUT_MS = parseInt(process.env.OPENROUTER_TIMEOUT_MS || '15000', 10) || 15_000;
-const RETRY_DELAY_MS = 1000;
+const REQUEST_TIMEOUT_MS = parseInt(process.env.OPENROUTER_TIMEOUT_MS || '10000', 10) || 10_000;
+/** Delay after a 429 before trying the next model. Short on purpose: rate limits
+ *  are per-model, so the next model is usually fine and we don't need to wait a
+ *  full second. Keeps the whole gym/start response inside the 25s request budget. */
+const RETRY_DELAY_MS = 300;
 /** Max image side (px) before re-encoding for the OpenRouter payload. Keeps base64 small. */
 const MAX_IMAGE_SIDE = parseInt(process.env.OPENROUTER_MAX_IMAGE_SIDE || '1024', 10) || 1024;
 const JPEG_QUALITY = parseInt(process.env.OPENROUTER_JPEG_QUALITY || '80', 10) || 80;
@@ -331,7 +335,7 @@ async function tryModels(
         `[OpenRouter] requestId=${requestId} model=${modelId} failed status=${result.statusCode ?? 'n/a'} reason=${result.error} trying_next=${i < GYM_MODELS.length - 1}`
       );
       if (i < GYM_MODELS.length - 1) {
-        await sleepWithJitter(isRateLimit ? RETRY_DELAY_MS : 400);
+        await sleepWithJitter(isRateLimit ? RETRY_DELAY_MS : 150);
         continue;
       }
       return null;
@@ -344,7 +348,7 @@ async function tryModels(
         `[OpenRouter] requestId=${requestId} model=${modelId} parse_failed content_len=${content.length} preview=${content.slice(0, 200)}`
       );
       if (i < GYM_MODELS.length - 1) {
-        await sleepWithJitter(400);
+        await sleepWithJitter(150);
         continue;
       }
       return null;
@@ -381,15 +385,12 @@ export async function classifyGymSceneOpenRouter(imagePath: string): Promise<Ope
 
   const modelResponses: Record<string, ModelResponseItem> = {};
 
-  let attempt = await tryModels(imageDataUrl, requestId, modelResponses);
+  const attempt = await tryModels(imageDataUrl, requestId, modelResponses);
   if (attempt) return { ...attempt, modelResponses };
 
-  // Single full retry — covers transient DNS/connection hiccups common on fresh VPS boots.
-  console.warn(`[OpenRouter] requestId=${requestId} first_pass_failed retrying_after=${RETRY_DELAY_MS}ms`);
-  await sleepWithJitter(RETRY_DELAY_MS);
-  attempt = await tryModels(imageDataUrl, `${requestId}-r2`, modelResponses);
-  if (attempt) return { ...attempt, modelResponses };
-
+  // No full second pass: each failed model already had its turn, and a second
+  // pass would push total runtime past the 25s request-timeout middleware,
+  // causing the handler to try to write a response after the client got a 503.
   return safeResult(modelResponses);
 }
 

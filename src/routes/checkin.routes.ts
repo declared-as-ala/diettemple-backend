@@ -150,6 +150,9 @@ router.post(
           attemptCount: nextAttemptCount,
           isProviderError,
         });
+        // Request-timeout middleware may have already sent a 503. Never try to
+        // write a second response — it throws ERR_HTTP_HEADERS_SENT.
+        if (res.headersSent) return;
         if (isProviderError) {
           res.setHeader('Retry-After', '5');
           return res.status(503).json({
@@ -208,6 +211,10 @@ router.post(
         acceptedReason: 'gym scene',
         forceEveryTime,
       });
+      // Request-timeout middleware may have already sent a 503. The DB record
+      // is persisted either way (so /workout/start will succeed on retry), but
+      // we must not try to send a second response on this socket.
+      if (res.headersSent) return;
       return res.status(201).json({
         verified: true,
         checkinId: (checkin as any)?._id ?? null,
