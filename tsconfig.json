@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/routes/plan.routes.ts",
+    "src/routes/workoutplan.routes.ts",
+    "src/models/UserPlanAssignment.model.ts",
+    "src/models/WorkoutPlanTemplate.model.ts",
+    "src/models/WorkoutSessionCompletion.model.ts",
+    "src/services/workoutPlanService.ts",
+    "src/scripts/seed-workout-plans.ts",
+    "src/utils/workoutPlanDateUtils.ts"
+  ]
+}
+
+
+

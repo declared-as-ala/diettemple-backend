@@ -1,0 +1,99 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name
+        id: string
+        run: |
+          IMAGE_ID=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image_id=ghcr.io/$IMAGE_ID" >> $GITHUB_OUTPUT
+
+      - name: Build and push Backend Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.string.outputs.image_id }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose.prod.yml and Caddyfile to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 178.105.255.135
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "docker-compose.prod.yml,Caddyfile"
+          target: "/app/diettemple"
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 178.105.255.135
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            mkdir -p /app/diettemple
+            cd /app/diettemple
+            
+            # Use the copied compose file as the active docker-compose.yml
+            mv -f docker-compose.prod.yml docker-compose.yml
+            
+            # Log in to GitHub Container Registry
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+            
+            # Make sure directories and environment file exist
+            mkdir -p backend
+            touch backend/.env
+            
+            # Pull only the backend service and restart it
+            docker compose pull backend
+            docker compose up -d backend
+            
+            # Start database if not running
+            docker compose up -d mongodb caddy
+            
+            # Seed products after backend is ready
+            echo "Waiting for backend to be ready..."
+            sleep 5
+            docker exec diettemple_backend node dist/scripts/seedProducts.js || echo "Seed products skipped (might already exist or DB not ready)"
+
+            # Cleanup old Docker images
+            docker image prune -f

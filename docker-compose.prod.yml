@@ -1,0 +1,144 @@
+# ==============================================================================
+# DietTemple Production Docker Compose — VPS Deploy (Hetzner CPX22)
+#
+# Pull pre-built images from GHCR — no compiling on VPS.
+#
+# VPS setup (run once):
+#   git clone https://github.com/declared-as-ala/diettemple-backend.git
+#   cd diettemple-backend
+#   cp .env.example .env && nano .env   # fill in secrets
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Update after every push:
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Volumes — survive ALL rebuilds and docker pulls:
+#   mongo_data   — MongoDB database files
+#   minio_data   — ALL uploaded files (images, videos, avatars)
+#   caddy_data   — Let's Encrypt SSL certificates
+#   caddy_config — Caddy runtime state
+# ==============================================================================
+
+version: '3.8'
+
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:6.0
+    container_name: diettemple_mongodb
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - diettemple_net
+
+  # ── MinIO Object Storage ───────────────────────────────────────────────────
+  # Console: https://minio.diettemple.tn
+  # API:     http://minio:9000 (Docker internal only)
+  minio:
+    image: minio/minio:latest
+    container_name: diettemple_minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-diettemple}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-this-in-env}
+    volumes:
+      - minio_data:/data
+    expose:
+      - "9000"
+      - "9001"
+    networks:
+      - diettemple_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ── Express API Backend ────────────────────────────────────────────────────
+  backend:
+    image: ghcr.io/declared-as-ala/diettemple-backend:latest
+    container_name: diettemple_backend
+    restart: always
+    expose:
+      - "5000"
+    env_file:
+      - ./.env
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/diettemple
+      - PORT=5000
+      - NODE_ENV=production
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-diettemple}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-change-this-in-env}
+    depends_on:
+      mongodb:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    networks:
+      - diettemple_net
+
+  # ── Next.js Admin Dashboard ────────────────────────────────────────────────
+  admin:
+    image: ghcr.io/declared-as-ala/diettemple-admin:latest
+    container_name: diettemple_admin
+    restart: always
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://api.diettemple.tn/api
+    networks:
+      - diettemple_net
+
+  # ── Marketing Website ──────────────────────────────────────────────────────
+  website:
+    image: ghcr.io/declared-as-ala/frontend-diettemple:latest
+    container_name: diettemple_website
+    restart: always
+    expose:
+      - "3000"
+    networks:
+      - diettemple_net
+
+  # ── Caddy Reverse Proxy ────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: diettemple_proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - admin
+      - website
+      - minio
+    networks:
+      - diettemple_net
+
+volumes:
+  mongo_data:
+    driver: local
+  minio_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  diettemple_net:
+    driver: bridge

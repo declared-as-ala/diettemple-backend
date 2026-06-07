@@ -1,0 +1,103 @@
+# ==============================================================================
+# DietTemple Caddyfile — Production
+# Caddy auto-manages free Let's Encrypt SSL for all domains.
+#
+# DNS A records required (→ your VPS IP: 178.105.255.135):
+#   api.diettemple.tn
+#   admin.diettemple.tn
+#   minio.diettemple.tn   ← MinIO web console
+#   diettemple.tn
+#   www.diettemple.tn
+# ==============================================================================
+
+{
+    email admin@diettemple.tn
+}
+
+# ==============================================================================
+# API — api.diettemple.tn
+#
+# /media/*  → MinIO bucket "media"  (images, avatars, product photos)
+# /videos/* → MinIO bucket "videos" (exercise demos, landing videos)
+# /*        → Express backend (API only, no file serving)
+# ==============================================================================
+api.diettemple.tn {
+
+    # ── Images & Photos ────────────────────────────────────────────────────
+    # MinIO serves: GET /media/products/img.jpg
+    # MinIO sees:   GET /media/products/img.jpg → bucket=media, key=products/img.jpg
+    handle /media/* {
+        reverse_proxy minio:9000 {
+            header_up Host minio:9000
+        }
+        header {
+            Access-Control-Allow-Origin  "*"
+            Cache-Control                "public, max-age=31536000, immutable"
+            X-Content-Type-Options       "nosniff"
+        }
+    }
+
+    # ── Videos ─────────────────────────────────────────────────────────────
+    # MinIO serves: GET /videos/exercises/abc/video.mp4
+    # MinIO sees:   GET /videos/exercises/abc/video.mp4 → bucket=videos, key=exercises/abc/video.mp4
+    # Caddy's file_server / MinIO both support HTTP Range natively (video seeking ✓)
+    handle /videos/* {
+        reverse_proxy minio:9000 {
+            header_up Host minio:9000
+        }
+        header {
+            Access-Control-Allow-Origin  "*"
+            Accept-Ranges                "bytes"
+            Cache-Control                "public, max-age=2592000"
+            X-Content-Type-Options       "nosniff"
+        }
+    }
+
+    # ── Express API ─────────────────────────────────────────────────────────
+    handle {
+        reverse_proxy backend:5000 {
+            header_up X-Real-IP         {remote_host}
+            header_up X-Forwarded-For   {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            health_uri      /health
+            health_interval 30s
+            health_timeout  5s
+        }
+    }
+}
+
+# ==============================================================================
+# Admin Dashboard — admin.diettemple.tn
+# ==============================================================================
+admin.diettemple.tn {
+    reverse_proxy admin:3000 {
+        header_up X-Real-IP         {remote_host}
+        header_up X-Forwarded-For   {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# ==============================================================================
+# MinIO Web Console — minio.diettemple.tn
+# Browse buckets, manage files, view upload history.
+# Secure with a strong MINIO_ROOT_PASSWORD in .env
+# ==============================================================================
+minio.diettemple.tn {
+    reverse_proxy minio:9001 {
+        header_up Host              minio:9001
+        header_up X-Real-IP         {remote_host}
+        header_up X-Forwarded-For   {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+
+# ==============================================================================
+# Marketing Website — diettemple.tn
+# ==============================================================================
+diettemple.tn, www.diettemple.tn {
+    reverse_proxy website:3000 {
+        header_up X-Real-IP         {remote_host}
+        header_up X-Forwarded-For   {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
