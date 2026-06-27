@@ -34,7 +34,8 @@
     "migrate:recipes:meal-prep": "ts-node src/scripts/migrateRecipesForMealPrep.ts",
     "reset:db": "ts-node src/scripts/resetDb.ts",
     "scrape:protein-tn": "node scrape-protein-tn.js",
-    "test:gym-meal": "node scripts/test-gym-meal-endpoints.js"
+    "test:gym-meal": "node scripts/test-gym-meal-endpoints.js",
+    "update:daily-objectives": "ts-node src/scripts/updateDailyObjectives.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

@@ -1775,5 +1775,164 @@ router.patch('/leads/:id/status', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// POST /admin/daily-programs/:userId/:date/main-objective/video - Upload main objective video
+router.post(
+  '/daily-programs/:userId/:date/main-objective/video',
+  upload.single('video'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { userId, date } = req.params;
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'Video file is required' });
+      }
+
+      // Parse date
+      const targetDate = new Date(date);
+      if (isNaN(targetDate.getTime())) {
+        if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
+        return res.status(400).json({ message: 'Invalid date format' });
+      }
+
+      targetDate.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Check if daily program exists
+      const dailyProgram = await DailyProgram.findOne({
+        userId,
+        date: {
+          $gte: targetDate,
+          $lte: endOfDay,
+        },
+      });
+
+      if (!dailyProgram) {
+        if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
+        return res.status(404).json({ message: 'Daily program not found for this user and date' });
+      }
+
+      // Upload video to MinIO
+      const sanitizedUserId = sanitizeSegment(userId);
+      const dateStr = date.replace(/\//g, '-');
+      const filename = buildFilename(req.file.originalname, 'objective', ['.mp4', '.webm']);
+      const objectKey = `daily-programs/${sanitizedUserId}/${dateStr}/${filename}`;
+      const videoUrl = await uploadToMinio(req.file, BUCKETS.VIDEOS, objectKey);
+
+      res.json({
+        message: 'Video uploaded successfully',
+        videoUrl,
+      });
+    } catch (error: any) {
+      if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
+      console.error('Error uploading objective video:', error);
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// PUT /admin/daily-programs/:userId/:date/main-objective - Update daily program's main objective (video & instructions)
+router.put(
+  '/daily-programs/:userId/:date/main-objective',
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { userId, date } = req.params;
+      const { title, description, videoUrl } = req.body;
+
+      if (!title) {
+        return res.status(400).json({ message: 'Title is required' });
+      }
+
+      // Parse date
+      const targetDate = new Date(date);
+      if (isNaN(targetDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid date format' });
+      }
+
+      targetDate.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Update daily program
+      const dailyProgram = await DailyProgram.findOneAndUpdate(
+        {
+          userId,
+          date: {
+            $gte: targetDate,
+            $lte: endOfDay,
+          },
+        },
+        {
+          mainObjective: {
+            title,
+            description: description || '',
+            videoUrl: videoUrl || null,
+          },
+        },
+        { new: true }
+      );
+
+      if (!dailyProgram) {
+        return res.status(404).json({ message: 'Daily program not found for this user and date' });
+      }
+
+      res.json({
+        message: 'Main objective updated successfully',
+        dailyProgram
+      });
+    } catch (error: any) {
+      console.error('Error updating main objective:', error);
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// GET /admin/users-simple - Get list of users for dropdown/search in daily objectives
+router.get(
+  '/users-simple',
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const search = (req.query.search as string) || '';
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const skip = (page - 1) * limit;
+
+      const query: any = {};
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      const users = await User.find(query)
+        .select('_id name email level')
+        .sort({ name: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const total = await User.countDocuments(query);
+
+      res.json({
+        users: users.map(u => ({
+          id: u._id,
+          name: u.name,
+          email: u.email,
+          level: u.level,
+        })),
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
 export default router;
 
