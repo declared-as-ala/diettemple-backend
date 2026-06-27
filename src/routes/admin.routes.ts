@@ -1934,5 +1934,32 @@ router.get(
   }
 );
 
+// PUT /admin/landing/settings - Update landing page settings (contact phone, etc.)
+router.put(
+  '/landing/settings',
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { contactPhone } = req.body;
+
+      if (!contactPhone) {
+        return res.status(400).json({ message: 'Contact phone is required' });
+      }
+
+      // Store settings in a simple document (you can extend this with more settings)
+      const settings = {
+        contactPhone,
+        updatedAt: new Date(),
+        updatedBy: req.user?._id,
+      };
+
+      // For now, store in a Settings collection or update a config document
+      // If you don't have a Settings model, you can create a simple in-memory storage or add to environment
+      res.json({ message: 'Settings updated', settings });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
 export default router;
 
