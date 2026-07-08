@@ -32,6 +32,7 @@ import verificationRoutes from './routes/verification.routes';
 import foodsRoutes from './routes/foods.routes';
 import leadsRoutes from './routes/leads.routes';
 import landingRoutes from './routes/landing.routes';
+import supportRoutes from './routes/support.routes';
 import { authenticate } from './middleware/auth.middleware';
 import { requireAdmin } from './middleware/admin.middleware';
 import { requestLogger, errorLogger } from './middleware/logger.middleware';
@@ -93,6 +94,7 @@ app.use('/api/foods', authenticate, foodsRoutes);
 app.use('/api/recipes', recipesRoutes);
 app.use('/api/leads', leadsRoutes);
 app.use('/api/landing', landingRoutes);
+app.use('/api/support', supportRoutes);
 
 app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'DietTemple API', health: '/health' });

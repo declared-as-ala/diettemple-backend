@@ -29,6 +29,7 @@ import nutritionAssignmentRoutes from './admin/nutritionAssignment.routes';
 import clientsRoutes from './admin/clients.routes';
 import recipesRoutes from './admin/recipes.routes';
 import landingVideoRoutes from './admin/landingVideo.routes';
+import Support from '../models/Support.model';
 
 const router = Router();
 const LEVEL_SLUG_REGEX = /^[a-z0-9-]+$/;
@@ -1957,6 +1958,99 @@ router.put(
       res.json({ message: 'Settings updated', settings });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// Support Tickets Management
+router.get(
+  '/support',
+  [
+    query('page').optional().isInt({ min: 1 }).toInt(),
+    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+    query('status').optional().isIn(['open', 'in-progress', 'resolved', 'closed']),
+    query('priority').optional().isIn(['low', 'medium', 'high']),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
+    }
+
+    try {
+      const page = req.query.page as any || 1;
+      const limit = req.query.limit as any || 20;
+      const skip = (page - 1) * limit;
+
+      const filter: any = {};
+      if (req.query.status) filter.status = req.query.status;
+      if (req.query.priority) filter.priority = req.query.priority;
+
+      const tickets = await Support.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const total = await Support.countDocuments(filter);
+
+      res.json({
+        tickets,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: 'error', message: error.message });
+    }
+  }
+);
+
+router.get('/support/:id', async (req, res) => {
+  try {
+    const ticket = await Support.findById(req.params.id);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    res.json({ ticket });
+  } catch (error: any) {
+    res.status(500).json({ error: 'error', message: error.message });
+  }
+});
+
+router.patch(
+  '/support/:id',
+  [
+    body('status').optional().isIn(['open', 'in-progress', 'resolved', 'closed']),
+    body('priority').optional().isIn(['low', 'medium', 'high']),
+    body('adminNotes').optional().isString(),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
+    }
+
+    try {
+      const { status, priority, adminNotes } = req.body;
+      const updates: any = {};
+
+      if (status !== undefined) updates.status = status;
+      if (priority !== undefined) updates.priority = priority;
+      if (adminNotes !== undefined) updates.adminNotes = adminNotes;
+
+      const ticket = await Support.findByIdAndUpdate(req.params.id, updates, { new: true });
+
+      if (!ticket) {
+        return res.status(404).json({ error: 'Ticket not found' });
+      }
+
+      res.json({ ticket });
+    } catch (error: any) {
+      res.status(500).json({ error: 'error', message: error.message });
     }
   }
 );
