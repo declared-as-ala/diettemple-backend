@@ -10,10 +10,10 @@ import { runSeed } from './runSeed';
 
 const USER_EMAIL = 'user1@diettemple.com';
 
-export async function seedExerciseHistory(): Promise<void> {
-  const user = await User.findOne({ email: USER_EMAIL }).select('_id').lean();
+export async function seedExerciseHistory(userEmail: string = USER_EMAIL): Promise<void> {
+  const user = await User.findOne({ email: userEmail }).select('_id').lean();
   if (!user) {
-    throw new Error(`User not found: ${USER_EMAIL}. Run seed:users first.`);
+    throw new Error(`User not found: ${userEmail}. Run seed:users first.`);
   }
   const userId = (user as any)._id;
 

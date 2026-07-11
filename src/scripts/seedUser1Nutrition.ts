@@ -72,10 +72,10 @@ const RECOMMENDATIONS = [
   'Variez les sources de glucides : riz, pâtes, quinoa, patate douce.',
 ];
 
-export async function seedUser1Nutrition(): Promise<void> {
-  const user = await User.findOne({ email: USER_EMAIL }).select('_id').lean();
+export async function seedUser1Nutrition(userEmail: string = USER_EMAIL): Promise<void> {
+  const user = await User.findOne({ email: userEmail }).select('_id').lean();
   if (!user) {
-    throw new Error(`User not found: ${USER_EMAIL}. Run seed:users first.`);
+    throw new Error(`User not found: ${userEmail}. Run seed:users first.`);
   }
   const userId = (user as any)._id;
 

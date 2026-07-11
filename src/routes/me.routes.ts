@@ -23,6 +23,8 @@ import PlanAssignment from '../models/PlanAssignment.model';
 import LevelHomeContent from '../models/LevelHomeContent.model';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { calculateWeeklyValidation } from '../services/weeklyValidation.service';
+import bcrypt from 'bcrypt';
+import { deleteUserAccount } from '../services/accountDeletion.service';
 
 const router = Router();
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -264,6 +266,41 @@ async function findMostRecentMissedSession(
   }
   return null;
 }
+
+// DELETE /api/me/account — permanently delete the authenticated user's account.
+// Requires the current password as confirmation. Removes the user document and
+// all personal data (subscription, programs, nutrition logs, workout history,
+// favorites, cart, check-ins, progress photos). Orders are retained for
+// financial record-keeping. Deleting the user invalidates every existing JWT
+// because the auth middleware re-loads the user on each request.
+router.delete(
+  '/account',
+  [body('password').notEmpty().withMessage('Password is required')],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
+      const user = await User.findById(req.user._id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      if (user.role === 'admin') {
+        return res.status(403).json({ message: 'Admin accounts cannot be deleted from the app' });
+      }
+
+      const isValid = await bcrypt.compare(req.body.password, (user as any).passwordHash);
+      if (!isValid) {
+        return res.status(401).json({ message: 'Mot de passe incorrect' });
+      }
+
+      const result = await deleteUserAccount(user._id);
+      res.json({ message: 'Account deleted', deleted: result.deletedUser });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
 
 // GET /api/me/subscription — returns same shape as /today subscription object
 router.get('/subscription', async (req: AuthRequest, res: Response) => {

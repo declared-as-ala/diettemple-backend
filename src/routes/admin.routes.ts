@@ -1971,7 +1971,7 @@ router.get(
     query('status').optional().isIn(['open', 'in-progress', 'resolved', 'closed']),
     query('priority').optional().isIn(['low', 'medium', 'high']),
   ],
-  async (req, res) => {
+  async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(422).json({ errors: errors.array() });

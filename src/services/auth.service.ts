@@ -61,6 +61,15 @@ export const isPhone = (str: string): boolean => {
   return /^[\d\s\+\-]+$/.test(str.replace(/\s/g, ''));
 };
 
+/** Never return credential material to clients. */
+const sanitizeUser = (user: IUser): IUser => {
+  const u = user.toObject();
+  delete (u as any).passwordHash;
+  delete (u as any).otp;
+  delete (u as any).otpExpires;
+  return u;
+};
+
 export const authService = {
   login: async (data: LoginData): Promise<{ user: IUser; token: string }> => {
     const isEmailInput = isEmail(data.emailOrPhone);
@@ -89,7 +98,7 @@ export const authService = {
     const token = generateToken(user._id.toString());
 
     return {
-      user: user.toObject(),
+      user: sanitizeUser(user),
       token,
     };
   },
@@ -234,7 +243,7 @@ export const authService = {
     const token = generateToken(user._id.toString());
 
     return {
-      user: user.toObject(),
+      user: sanitizeUser(user),
       token,
     };
   },

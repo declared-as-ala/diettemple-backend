@@ -49,7 +49,7 @@ function addDays(d: Date, n: number): Date {
   return out;
 }
 
-export async function seedUser1Plan(): Promise<{
+export async function seedUser1Plan(userEmail: string = USER_EMAIL): Promise<{
   planStartDate: Date;
   planEndDate: Date;
   todayDateKey: string;
@@ -60,8 +60,8 @@ export async function seedUser1Plan(): Promise<{
   const today = getTodayDate();
   const todayDateKey = dateKey(today);
 
-  const user = await User.findOne({ email: USER_EMAIL }).select('_id').lean();
-  if (!user) throw new Error(`User not found: ${USER_EMAIL}. Run seed:users first.`);
+  const user = await User.findOne({ email: userEmail }).select('_id').lean();
+  if (!user) throw new Error(`User not found: ${userEmail}. Run seed:users first.`);
   const userId = (user as any)._id;
 
   const level = await LevelTemplate.findOne({ name: 'Initiate' }).lean();

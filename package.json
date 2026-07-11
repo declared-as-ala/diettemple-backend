@@ -29,6 +29,7 @@
     "seed:workout-plan": "ts-node src/scripts/seedWorkoutPlan.ts",
     "seed:foods": "ts-node src/scripts/seedFoods.ts",
     "seed:all": "ts-node src/scripts/seedAll.ts",
+    "seed:apple-review": "ts-node src/scripts/seedAppleReviewAccount.ts",
     "test:exercise-recommendation": "ts-node src/services/exerciseRecommendation.service.test.ts",
     "test:recipe-filters": "ts-node src/services/recipeFilter.service.test.ts",
     "migrate:recipes:meal-prep": "ts-node src/scripts/migrateRecipesForMealPrep.ts",
