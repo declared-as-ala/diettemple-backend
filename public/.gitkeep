@@ -1,0 +1,1 @@
+# Keep this directory in git so that Docker COPY public ./public does not fail in CI/CD
