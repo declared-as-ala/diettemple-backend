@@ -1123,8 +1123,76 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
     const date = typeof req.query.date === 'string' ? req.query.date : undefined;
-    const summary = await calculateWeeklyValidation(userId, date);
-    return res.json(summary);
+
+    // Calculate dates
+    const inputDate = date ? new Date(date) : new Date();
+    const dayOfWeek = inputDate.getDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const weekStartMs = new Date(inputDate).setDate(inputDate.getDate() + diffToMonday);
+    const weekStart = new Date(weekStartMs);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStartMs + 7 * 24 * 60 * 60 * 1000 - 1);
+
+    const completedSessions = await WorkoutSession.find({
+      userId,
+      status: 'completed',
+      date: { $gte: weekStart, $lte: weekEnd },
+    }).select('date').lean();
+
+    const dateToKeyUtc = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    const workoutDateKeys = new Set(
+      (completedSessions as Array<{ date: Date }>).map((doc) => dateToKeyUtc(new Date(doc.date)))
+    );
+
+    const nutritionLogs = await DailyNutritionLog.find({
+      userId,
+      date: { $gte: weekStart, $lte: weekEnd },
+      status: 'complete',
+    }).select('date status').lean();
+
+    const nutritionDateKeys = new Set(
+      (nutritionLogs as Array<{ date: Date }>).map((doc) => dateToKeyUtc(new Date(doc.date)))
+    );
+
+    const todayKey = dateToKeyUtc(new Date());
+    const DAY_LABELS_FR = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'];
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const dayDate = new Date(weekStart.getTime() + i * 24 * 60 * 60 * 1000);
+      const dateKey = dateToKeyUtc(dayDate);
+      const workoutCompleted = workoutDateKeys.has(dateKey);
+      const nutritionGoalCompleted = nutritionDateKeys.has(dateKey);
+      days.push({
+        date: dateKey,
+        label: DAY_LABELS_FR[i],
+        workoutCompleted,
+        nutritionGoalCompleted,
+        isValidated: workoutCompleted && nutritionGoalCompleted,
+        isToday: dateKey === todayKey,
+      });
+    }
+
+    const validatedDaysCount = days.filter((d) => d.isValidated).length;
+    const today = days.find((d) => d.isToday) || days[0];
+    const missing: Array<'workout' | 'nutrition'> = [];
+    if (!today.workoutCompleted) missing.push('workout');
+    if (!today.nutritionGoalCompleted) missing.push('nutrition');
+
+    return res.json({
+      weekStart: dateToKeyUtc(weekStart),
+      weekEnd: dateToKeyUtc(new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000)),
+      validatedDaysCount,
+      totalDays: 7,
+      today: {
+        date: today.date,
+        workoutCompleted: today.workoutCompleted,
+        nutritionGoalCompleted: today.nutritionGoalCompleted,
+        isValidated: today.isValidated,
+        statusLabel: today.isValidated ? 'Journée validée' : 'Journée non validée',
+        missing,
+      },
+      days,
+    });
   } catch (e: unknown) {
     return res.status(500).json({ message: (e as Error).message });
   }

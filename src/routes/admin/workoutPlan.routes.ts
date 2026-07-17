@@ -11,8 +11,6 @@ import LevelTemplate from '../../models/LevelTemplate.model';
 import WorkoutSession from '../../models/WorkoutSession.model';
 const router = Router();
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const PLAN_WEEKS = 5;
-const PLAN_DAYS = PLAN_WEEKS * 7;
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 
 function parseStartDate(raw: string): Date {
@@ -42,8 +40,15 @@ router.post(
 
       const level = await LevelTemplate.findById(planTemplateId).lean();
       if (!level) return res.status(404).json({ message: 'Plan template not found' });
-      if (!(level as any).weeks || (level as any).weeks.length !== 5) {
-        return res.status(400).json({ message: 'Plan template must have exactly 5 weeks' });
+      if (!(level as any).weeks || (level as any).weeks.length === 0) {
+        return res.status(400).json({ message: 'Plan template must have at least 1 week' });
+      }
+
+      // Check plan completeness
+      if ((level as any).minimumSessionsPerWeek === undefined || (level as any).maximumSessionsPerWeek === undefined) {
+        return res.status(400).json({
+          message: "Ce programme est incomplet (nombre de séances min/max non configuré). Veuillez le mettre à jour avant de l'assigner."
+        });
       }
 
       // Archive any existing active assignment (single active assignment per user).
@@ -90,8 +95,15 @@ router.post(
 
       const level = await LevelTemplate.findById(planTemplateId).lean();
       if (!level) return res.status(404).json({ message: 'Plan template not found' });
-      if (!(level as any).weeks || (level as any).weeks.length !== 5) {
-        return res.status(400).json({ message: 'Plan template must have exactly 5 weeks' });
+      if (!(level as any).weeks || (level as any).weeks.length === 0) {
+        return res.status(400).json({ message: 'Plan template must have at least 1 week' });
+      }
+
+      // Check plan completeness
+      if ((level as any).minimumSessionsPerWeek === undefined || (level as any).maximumSessionsPerWeek === undefined) {
+        return res.status(400).json({
+          message: "Ce programme est incomplet (nombre de séances min/max non configuré). Veuillez le mettre à jour avant de l'assigner."
+        });
       }
 
       // Archive old assignment before creating the new one.
@@ -135,6 +147,7 @@ router.get(
       const startMs = new Date(assignment.startDate).getTime();
       const planEndMs = new Date(assignment.endDate).getTime();
       const todayMs = Date.now();
+      const durationWeeks = assignment.durationWeeks || 5;
 
       const completed = await WorkoutSession.find({
         userId, status: 'completed',
@@ -143,7 +156,7 @@ router.get(
 
       let totalScheduled = 0, totalCompleted = 0, totalMissed = 0;
 
-      for (let w = 0; w < PLAN_WEEKS; w++) {
+      for (let w = 0; w < durationWeeks; w++) {
         const weekTpl = (level as any)?.weeks?.find((wk: any) => wk.weekNumber === w + 1);
         for (let d = 0; d < 7; d++) {
           const pl = (weekTpl?.days as any)?.[DAY_KEYS[d]] || [];
@@ -165,24 +178,24 @@ router.get(
       const pct = totalScheduled > 0 ? Math.min(100, Math.round((totalCompleted / totalScheduled) * 100)) : 0;
       const remDays = Math.max(0, Math.ceil((planEndMs - todayMs) / MS_PER_DAY));
       const diff = Math.floor((todayMs - startMs) / MS_PER_DAY);
-      const currWk = Math.max(0, Math.min(PLAN_WEEKS - 1, Math.floor(diff / 7)));
+      const currWk = Math.max(0, Math.min(durationWeeks - 1, Math.floor(diff / 7)));
 
       res.json({
         assignment: {
           id: String((assignment as any)._id),
           startDate: assignment.startDate,
           endDate: assignment.endDate,
-          durationWeeks: PLAN_WEEKS,
+          durationWeeks,
           status: assignment.status,
         },
-        plan: {
+        plan: level ? {
           id: String((level as any)._id),
           name: (level as any).name,
           gender: (level as any).gender,
-        },
+        } : null,
         progress: {
           currentWeek: currWk,
-          totalWeeks: PLAN_WEEKS,
+          totalWeeks: durationWeeks,
           totalScheduledSessions: totalScheduled,
           completedSessions: totalCompleted,
           missedSessions: totalMissed,

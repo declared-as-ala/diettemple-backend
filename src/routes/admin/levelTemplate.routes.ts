@@ -10,25 +10,21 @@ function countWeekSessions(week: { days?: Record<string, unknown[]> }): number {
   return DAY_KEYS.reduce((sum, d) => sum + (week.days?.[d]?.length ?? 0), 0);
 }
 
-function validateWeeks(weeks: unknown[]): { valid: boolean; message?: string } {
-  if (!Array.isArray(weeks) || weeks.length !== 5) {
-    return { valid: false, message: 'Exactly 5 weeks required' };
+function validateWeeks(weeks: unknown[], expectedWeeks: number): { valid: boolean; message?: string } {
+  if (!Array.isArray(weeks) || weeks.length !== expectedWeeks) {
+    return { valid: false, message: `Exactly ${expectedWeeks} weeks required` };
   }
   const seen = new Set<number>();
   for (let i = 0; i < weeks.length; i++) {
     const w = weeks[i] as Record<string, unknown>;
     const num = w?.weekNumber as number;
-    if (num == null || num < 1 || num > 5) {
-      return { valid: false, message: `Week ${i + 1}: weekNumber must be 1–5` };
+    if (num == null || num < 1 || num > expectedWeeks) {
+      return { valid: false, message: `Week ${i + 1}: weekNumber must be 1–${expectedWeeks}` };
     }
     if (seen.has(num)) {
       return { valid: false, message: `Duplicate weekNumber: ${num}` };
     }
     seen.add(num);
-    const count = countWeekSessions(w as { days?: Record<string, unknown[]> });
-    if (count < 4 || count > 7) {
-      return { valid: false, message: `Week ${num}: sessions per week must be 4–7 (got ${count})` };
-    }
   }
   return { valid: true };
 }
@@ -105,12 +101,24 @@ router.post(
       if (existing) {
         return res.status(409).json({ message: `Un template "${req.body.name}" (${gender}) existe déjà.` });
       }
+
+      const durationWeeks = req.body.durationWeeks ? Number(req.body.durationWeeks) : 5;
+      const initialWeeks = Array.from({ length: durationWeeks }, (_, i) => ({
+        weekNumber: i + 1,
+        days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }
+      }));
+
       const plan = await LevelTemplate.create({
         name: req.body.name,
         description: req.body.description,
         imageUrl: req.body.imageUrl,
         isActive: req.body.isActive !== false,
         gender,
+        durationWeeks,
+        minimumSessionsPerWeek: req.body.minimumSessionsPerWeek,
+        maximumSessionsPerWeek: req.body.maximumSessionsPerWeek,
+        divisions: req.body.divisions || [],
+        weeks: initialWeeks,
       });
       res.status(201).json({ levelTemplate: plan.toObject() });
     } catch (err: unknown) {
@@ -137,6 +145,29 @@ router.put(
       if (req.body.imageUrl !== undefined) plan.imageUrl = req.body.imageUrl;
       if (req.body.isActive != null) plan.isActive = req.body.isActive;
       if (req.body.gender !== undefined) plan.gender = req.body.gender;
+      
+      if (req.body.durationWeeks !== undefined) {
+        const oldDuration = plan.durationWeeks || 5;
+        const newDuration = Number(req.body.durationWeeks);
+        plan.durationWeeks = newDuration;
+        
+        // Resize weeks array
+        if (newDuration > oldDuration) {
+          for (let w = oldDuration + 1; w <= newDuration; w++) {
+            plan.weeks.push({
+              weekNumber: w,
+              days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }
+            });
+          }
+        } else if (newDuration < oldDuration) {
+          plan.weeks = plan.weeks.filter((w: any) => w.weekNumber <= newDuration);
+        }
+      }
+
+      if (req.body.minimumSessionsPerWeek !== undefined) plan.minimumSessionsPerWeek = req.body.minimumSessionsPerWeek;
+      if (req.body.maximumSessionsPerWeek !== undefined) plan.maximumSessionsPerWeek = req.body.maximumSessionsPerWeek;
+      if (req.body.divisions !== undefined) plan.divisions = req.body.divisions;
+
       await plan.save();
       res.json({ levelTemplate: plan.toObject() });
     } catch (err: unknown) {
@@ -151,24 +182,26 @@ router.put(
   [param('id').isMongoId(), body('weeks').isArray().withMessage('weeks must be an array')],
   async (req: AuthRequest, res: Response) => {
     try {
-      const validation = validateWeeks(req.body.weeks);
-      if (!validation.valid) {
-        return res.status(400).json({ message: validation.message });
-      }
       const plan = await LevelTemplate.findById(req.params.id);
       if (!plan) {
         return res.status(404).json({ message: 'Level template not found' });
       }
-      const weeks = req.body.weeks.map((w: Record<string, unknown>) => ({
+      
+      const validation = validateWeeks(req.body.weeks, plan.durationWeeks || 5);
+      if (!validation.valid) {
+        return res.status(400).json({ message: validation.message });
+      }
+
+      const weeks = req.body.weeks.map((w: Record<string, any>) => ({
         weekNumber: w.weekNumber,
         days: {
-          mon: (w.days as Record<string, unknown[]>)?.mon || [],
-          tue: (w.days as Record<string, unknown[]>)?.tue || [],
-          wed: (w.days as Record<string, unknown[]>)?.wed || [],
-          thu: (w.days as Record<string, unknown[]>)?.thu || [],
-          fri: (w.days as Record<string, unknown[]>)?.fri || [],
-          sat: (w.days as Record<string, unknown[]>)?.sat || [],
-          sun: (w.days as Record<string, unknown[]>)?.sun || [],
+          mon: (w.days?.mon || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
+          tue: (w.days?.tue || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
+          wed: (w.days?.wed || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
+          thu: (w.days?.thu || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
+          fri: (w.days?.fri || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
+          sat: (w.days?.sat || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
+          sun: (w.days?.sun || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
         },
       }));
       plan.weeks = weeks;

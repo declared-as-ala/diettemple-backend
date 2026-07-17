@@ -747,6 +747,146 @@ router.post(
   }
 );
 
+// PUT /:id — update client profile
+router.put(
+  '/:id',
+  [
+    param('id').isMongoId(),
+    body('name').optional().trim(),
+    body('email').optional().isEmail(),
+    body('phone').optional().isString(),
+    body('sexe').optional().isIn(['M', 'F']),
+    body('age').optional().isString(),
+    body('taille').optional().isString(),
+    body('poids').optional().isString(),
+    body('objectif').optional().isString(),
+    body('fitnessLevel').optional().isIn(['A', 'B']),
+    body('bodyComposition').optional().isObject(),
+    body('nutritionGoal').optional().isObject(),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
+      const userId = req.params.id;
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ message: 'Client introuvable' });
+      }
+
+      if (req.body.name !== undefined) user.name = req.body.name;
+      if (req.body.email !== undefined) user.email = req.body.email.toLowerCase();
+      if (req.body.phone !== undefined) user.phone = req.body.phone.trim();
+      if (req.body.sexe !== undefined) user.sexe = req.body.sexe;
+      if (req.body.age !== undefined) user.age = req.body.age;
+      if (req.body.taille !== undefined) user.taille = req.body.taille;
+      if (req.body.poids !== undefined) user.poids = req.body.poids;
+      if (req.body.objectif !== undefined) user.objectif = req.body.objectif;
+      if (req.body.fitnessLevel !== undefined) user.fitnessLevel = req.body.fitnessLevel;
+      if (req.body.bodyComposition !== undefined) {
+        user.bodyComposition = {
+          bodyFatPercentage: req.body.bodyComposition.bodyFatPercentage,
+          muscleMassPercentage: req.body.bodyComposition.muscleMassPercentage,
+        };
+      }
+      if (req.body.nutritionGoal !== undefined) {
+        user.nutritionGoal = {
+          calorieMode: req.body.nutritionGoal.calorieMode,
+          calorieAdjustment: req.body.nutritionGoal.calorieAdjustment,
+          proteinGrams: req.body.nutritionGoal.proteinGrams,
+          carbohydrateGrams: req.body.nutritionGoal.carbohydrateGrams,
+          fatGrams: req.body.nutritionGoal.fatGrams,
+        };
+
+        // Sync calculated dailyCalories, proteinG, carbsG, fatG in nutritionTarget
+        // Mifflin-St Jeor Formula
+        const weight = parseFloat(user.poids || '0');
+        const height = parseFloat(user.taille || '0');
+        const age = parseFloat(user.age || '0');
+        const sexe = user.sexe;
+
+        let baseCal = 2000;
+        if (weight > 0 && height > 0 && age > 0 && sexe) {
+          let bmr = 10 * weight + 6.25 * height - 5 * age;
+          if (sexe === 'M') {
+            bmr += 5;
+          } else {
+            bmr -= 161;
+          }
+          baseCal = Math.round(bmr * 1.375);
+        }
+
+        const adjustment = req.body.nutritionGoal.calorieAdjustment || 0;
+        let dailyCalories = baseCal;
+        if (req.body.nutritionGoal.calorieMode === 'SURPLUS') {
+          dailyCalories = baseCal + adjustment;
+        } else if (req.body.nutritionGoal.calorieMode === 'DEFICIT') {
+          dailyCalories = Math.max(0, baseCal - adjustment);
+        }
+
+        user.nutritionTarget = {
+          dailyCalories,
+          proteinG: req.body.nutritionGoal.proteinGrams || 0,
+          carbsG: req.body.nutritionGoal.carbohydrateGrams !== null ? req.body.nutritionGoal.carbohydrateGrams : undefined,
+          fatG: req.body.nutritionGoal.fatGrams !== null ? req.body.nutritionGoal.fatGrams : undefined,
+        };
+      }
+
+      await user.save();
+      await emitUserUpdated(String(user._id));
+
+      if (req.user?._id) {
+        await AuditLog.create({
+          actorAdminId: req.user._id,
+          targetUserId: user._id,
+          actionType: 'client_update',
+          metadata: { fields: Object.keys(req.body) },
+        });
+      }
+
+      res.json({ client: user });
+    } catch (e: unknown) {
+      res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
+
+// GET /:id/weekly-validation
+router.get(
+  '/:id/weekly-validation',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const { calculateWeeklyValidation } = await import('../../services/weeklyValidation.service');
+      const date = typeof req.query.date === 'string' ? req.query.date : undefined;
+      const summary = await calculateWeeklyValidation(userId, date);
+      return res.json(summary);
+    } catch (e: unknown) {
+      return res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
+
+// GET /:id/weekly-validation/history
+router.get(
+  '/:id/weekly-validation/history',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.params.id;
+      const WeeklySummary = (await import('../../models/WeeklySummary.model')).default;
+      const history = await WeeklySummary.find({ userId }).sort({ weekStart: -1 }).lean();
+      return res.json({ history });
+    } catch (e: unknown) {
+      return res.status(500).json({ message: (e as Error).message });
+    }
+  }
+);
+
 // GET /:id — profile overview (must be last)
 router.get(
   '/:id',

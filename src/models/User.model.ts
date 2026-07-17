@@ -7,12 +7,12 @@ export interface IUser extends Document {
   name?: string;
   photoUri?: string;
   age?: string;
-  sexe?: string;
+  sexe?: 'M' | 'F';
   poids?: string;
   taille?: string;
   objectif?: string;
   level?: 'Intiate' | 'Fighter' | 'Warrior' | 'Champion' | 'Elite';
-  role?: 'user' | 'admin';
+  role?: 'user' | 'admin' | 'employee' | 'coach' | 'nutritionist';
   biometricEnabled: boolean;
   biometricType: 'fingerprint' | 'faceid' | null;
   otp?: string;
@@ -23,6 +23,20 @@ export interface IUser extends Document {
     carbsG?: number;
     fatG?: number;
   };
+  bodyComposition?: {
+    bodyFatPercentage?: number;
+    muscleMassPercentage?: number;
+  };
+  fitnessLevel?: 'A' | 'B';
+  nutritionGoal?: {
+    calorieMode?: 'SURPLUS' | 'DEFICIT';
+    calorieAdjustment?: number;
+    proteinGrams?: number;
+    carbohydrateGrams?: number;
+    fatGrams?: number;
+  };
+  assignedPlanId?: mongoose.Types.ObjectId;
+  planAssignmentStartDate?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -58,6 +72,7 @@ const UserSchema: Schema = new Schema(
     },
     sexe: {
       type: String,
+      enum: ['M', 'F'],
     },
     poids: {
       type: String,
@@ -75,7 +90,7 @@ const UserSchema: Schema = new Schema(
     },
     role: {
       type: String,
-      enum: ['user', 'admin'],
+      enum: ['user', 'admin', 'employee', 'coach', 'nutritionist'],
       default: 'user',
       index: true,
     },
@@ -99,6 +114,28 @@ const UserSchema: Schema = new Schema(
       proteinG: { type: Number },
       carbsG: { type: Number },
       fatG: { type: Number },
+    },
+    bodyComposition: {
+      bodyFatPercentage: { type: Number, min: 0, max: 100 },
+      muscleMassPercentage: { type: Number, min: 0, max: 100 },
+    },
+    fitnessLevel: {
+      type: String,
+      enum: ['A', 'B'],
+    },
+    nutritionGoal: {
+      calorieMode: { type: String, enum: ['SURPLUS', 'DEFICIT'] },
+      calorieAdjustment: { type: Number, min: 0 },
+      proteinGrams: { type: Number, min: 0 },
+      carbohydrateGrams: { type: Number },
+      fatGrams: { type: Number },
+    },
+    assignedPlanId: {
+      type: Schema.Types.ObjectId,
+      ref: 'LevelTemplate',
+    },
+    planAssignmentStartDate: {
+      type: Date,
     },
   },
   {

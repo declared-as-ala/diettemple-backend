@@ -2,6 +2,22 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 
+export interface IPlanDivision {
+  _id?: mongoose.Types.ObjectId;
+  name: string;
+  order: number;
+  description?: string;
+}
+
+const PlanDivisionSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    order: { type: Number, required: true, default: 0 },
+    description: { type: String },
+  },
+  { _id: true }
+);
+
 const SessionPlacementSchema = new Schema(
   {
     sessionTemplateId: {
@@ -11,13 +27,14 @@ const SessionPlacementSchema = new Schema(
     },
     note: { type: String },
     order: { type: Number, default: 0 },
+    divisionId: { type: Schema.Types.ObjectId },
   },
   { _id: false }
 );
 
 const WeekTemplateSchema = new Schema(
   {
-    weekNumber: { type: Number, required: true, min: 1, max: 5 },
+    weekNumber: { type: Number, required: true, min: 1, max: 100 },
     days: {
       mon: [SessionPlacementSchema],
       tue: [SessionPlacementSchema],
@@ -31,14 +48,11 @@ const WeekTemplateSchema = new Schema(
   { _id: false }
 );
 
-function countWeekSessions(week: { days: Record<string, unknown[]> }): number {
-  return DAY_KEYS.reduce((sum, d) => sum + (week.days?.[d]?.length ?? 0), 0);
-}
-
 export interface ISessionPlacement {
   sessionTemplateId: mongoose.Types.ObjectId;
   note?: string;
   order?: number;
+  divisionId?: mongoose.Types.ObjectId;
 }
 
 export interface IWeekTemplate {
@@ -53,6 +67,10 @@ export interface ILevelTemplate extends Document {
   isActive: boolean;
   gender?: 'M' | 'F' | null;
   weeks: IWeekTemplate[];
+  durationWeeks: number;
+  minimumSessionsPerWeek?: number;
+  maximumSessionsPerWeek?: number;
+  divisions: IPlanDivision[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -78,21 +96,25 @@ const LevelTemplateSchema = new Schema(
     description: { type: String },
     imageUrl: { type: String },
     isActive: { type: Boolean, default: true, index: true },
+    durationWeeks: { type: Number, default: 5, required: true, min: 1 },
+    minimumSessionsPerWeek: { type: Number },
+    maximumSessionsPerWeek: { type: Number },
+    divisions: { type: [PlanDivisionSchema], default: [] },
     weeks: {
       type: [WeekTemplateSchema],
       default: defaultWeeks,
       validate: {
         validator(v: IWeekTemplate[]) {
-          if (!Array.isArray(v) || v.length !== 5) return false;
+          if (!Array.isArray(v)) return false;
           const nums = new Set<number>();
           for (const w of v) {
-            if (w.weekNumber < 1 || w.weekNumber > 5) return false;
+            if (w.weekNumber < 1) return false;
             if (nums.has(w.weekNumber)) return false;
             nums.add(w.weekNumber);
           }
           return true;
         },
-        message: 'Must have exactly 5 weeks with unique weekNumber 1–5',
+        message: 'Must have unique weekNumbers starting from 1',
       },
     },
   },

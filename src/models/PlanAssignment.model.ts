@@ -30,15 +30,8 @@ export interface IPlanAssignment extends Document {
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1_000;
-const PLAN_DURATION_DAYS = 35; // 5 weeks x 7 days
-const PLAN_DURATION_WEEKS = 5;
-
-function defaultOverrides() {
-  return [1, 2, 3, 4, 5].map((n) => ({
-    weekNumber: n,
-    days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] },
-  }));
-}
+export const PLAN_DURATION_DAYS = 35;
+export const PLAN_DURATION_WEEKS = 5;
 
 const PlanAssignmentSchema: Schema = new Schema(
   {
@@ -55,7 +48,7 @@ const PlanAssignmentSchema: Schema = new Schema(
     },
     overridesByWeek: {
       type: [{
-        weekNumber: { type: Number, required: true, min: 1, max: 5 },
+        weekNumber: { type: Number, required: true, min: 1, max: 100 },
         days: {
           mon: [new Schema({ sessionTemplateId: { type: Schema.Types.ObjectId, ref: 'SessionTemplate' }, note: String, order: Number }, { _id: false })],
           tue: [new Schema({ sessionTemplateId: { type: Schema.Types.ObjectId, ref: 'SessionTemplate' }, note: String, order: Number }, { _id: false })],
@@ -66,7 +59,7 @@ const PlanAssignmentSchema: Schema = new Schema(
           sun: [new Schema({ sessionTemplateId: { type: Schema.Types.ObjectId, ref: 'SessionTemplate' }, note: String, order: Number }, { _id: false })],
         },
       }],
-      default: defaultOverrides,
+      default: () => [],
     },
     status: {
       type: String,
@@ -76,7 +69,7 @@ const PlanAssignmentSchema: Schema = new Schema(
     },
     startDate: { type: Date, required: true },
     endDate: { type: Date },
-    durationWeeks: { type: Number, default: PLAN_DURATION_WEEKS, immutable: true },
+    durationWeeks: { type: Number, default: 5 },
     assignedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     assignedAt: { type: Date, default: Date.now },
     note: { type: String },
@@ -86,18 +79,26 @@ const PlanAssignmentSchema: Schema = new Schema(
   { timestamps: true }
 );
 
-PlanAssignmentSchema.pre('save', function (next) {
-  if (this.isModified('startDate') || this.isNew) {
-    const start = new Date(this.startDate as unknown as string);
-    start.setHours(0, 0, 0, 0);
-    this.startDate = start as any;
-    this.endDate = new Date(start.getTime() + PLAN_DURATION_DAYS * MS_PER_DAY);
-    this.durationWeeks = PLAN_DURATION_WEEKS;
+PlanAssignmentSchema.pre('save', async function (next) {
+  try {
+    if (this.isModified('startDate') || this.isNew) {
+      const start = new Date(this.startDate as unknown as string);
+      start.setHours(0, 0, 0, 0);
+      this.startDate = start as any;
+      
+      const LevelTemplate = mongoose.model('LevelTemplate');
+      const template = await LevelTemplate.findById(this.levelTemplateId).lean();
+      const durationWeeks = template && typeof (template as any).durationWeeks === 'number'
+        ? (template as any).durationWeeks
+        : 5;
+        
+      this.durationWeeks = durationWeeks;
+      this.endDate = new Date(start.getTime() + (durationWeeks * 7) * MS_PER_DAY);
+    }
+    next();
+  } catch (err: any) {
+    next(err);
   }
-  if ((this.durationWeeks as unknown as number) !== PLAN_DURATION_WEEKS) {
-    this.durationWeeks = PLAN_DURATION_WEEKS;
-  }
-  next();
 });
 
 PlanAssignmentSchema.index({ userId: 1, status: 1 });
