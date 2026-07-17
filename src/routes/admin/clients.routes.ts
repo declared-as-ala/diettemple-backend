@@ -139,12 +139,19 @@ router.post(
     body('email').optional().isEmail(),
     body('phone').optional().isString(),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body('sexe').optional().isIn(['M', 'F']),
+    body('age').optional().isString(),
+    body('taille').optional().isString(),
+    body('poids').optional().isString(),
+    body('objectif').optional().isString(),
+    body('fitnessLevel').optional().isIn(['A', 'B']),
+    body('bodyComposition').optional().isObject(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
-      const { name, email, phone, password } = req.body;
+      const { name, email, phone, password, sexe, age, taille, poids, objectif, fitnessLevel, bodyComposition } = req.body;
       if (!email && !phone) return res.status(400).json({ message: 'Either email or phone is required' });
       const bcrypt = await import('bcrypt');
       const existing = await User.findOne(email ? { email: email.toLowerCase() } : { phone: phone?.trim() });
@@ -156,6 +163,16 @@ router.post(
         phone: phone?.trim() || undefined,
         passwordHash,
         role: 'user',
+        sexe,
+        age,
+        taille,
+        poids,
+        objectif,
+        fitnessLevel,
+        bodyComposition: bodyComposition ? {
+          bodyFatPercentage: bodyComposition.bodyFatPercentage,
+          muscleMassPercentage: bodyComposition.muscleMassPercentage,
+        } : undefined,
       });
       const doc = user.toObject();
       delete (doc as any).passwordHash;
