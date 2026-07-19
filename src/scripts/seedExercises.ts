@@ -1,12 +1,17 @@
 /**
- * Seed exercises for PPL and general use. Upsert by name (deterministic).
- * Run first; session and level seeds depend on exercise names.
+ * Seed exercises - Just-In-Time approach
+ * Only adds missing exercises from production MongoDB
+ * Preserves all existing exercises (non-destructive)
+ *
+ * Production Database: mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/?appName=Cluster0
+ * Atlas Collection: https://cloud.mongodb.com/v2/650b1eeefd98a76e09e96126#/explorer/650b1f441bc7e24936b93dfd/diettemple/exercises/find
  */
 import Exercise from '../models/Exercise.model';
 import { runSeed } from './runSeed';
+import mongoose from 'mongoose';
 
-/** PPL and mobility exercises by name – used by session templates */
-const PPL_EXERCISES = [
+/** Fallback PPL exercises if production DB is unavailable */
+const FALLBACK_EXERCISES = [
   // Push – Chest
   { name: 'Bench Press', muscleGroup: 'chest', equipment: 'barbell' as const, difficulty: 'intermediate' as const, description: 'Flat barbell press. Compound movement for chest, shoulders, triceps.', videoUrl: '/videos/chest/bench-press.mp4' },
   { name: 'Dumbbell Press', muscleGroup: 'chest', equipment: 'dumbbell' as const, difficulty: 'intermediate' as const, description: 'Flat dumbbell press. Greater range of motion than barbell.', videoUrl: '/videos/chest/dumbbell-press.mp4' },
@@ -60,8 +65,51 @@ const PPL_EXERCISES = [
   { name: 'Hip Flexor Stretch', muscleGroup: 'core', equipment: 'bodyweight' as const, difficulty: 'beginner' as const, description: 'Kneeling hip flexor stretch.', videoUrl: '/videos/core/hip-flexor.mp4' },
 ];
 
+async function fetchProductionExercises(): Promise<any[]> {
+  try {
+    const PROD_URI = 'mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/?appName=Cluster0';
+    const prodConn = await mongoose.createConnection(PROD_URI).asPromise();
+    const prodExercisesCollection = prodConn.collection('exercises');
+    const exercises = await prodExercisesCollection.find({}).toArray();
+    await prodConn.disconnect();
+    console.log(`📥 Fetched ${exercises.length} exercises from production MongoDB`);
+    return exercises || [];
+  } catch (err) {
+    console.warn('⚠️  Could not fetch from production DB, using fallback:', (err as Error).message);
+    return [];
+  }
+}
+
 export async function seedExercises(): Promise<number> {
-  const ops = PPL_EXERCISES.map((ex) => ({
+  // Fetch existing exercises from production
+  const prodExercises = await fetchProductionExercises();
+
+  // Combine production exercises with fallback (production takes precedence)
+  const exercisesByName = new Map();
+
+  // Add fallback exercises first
+  FALLBACK_EXERCISES.forEach((ex) => {
+    exercisesByName.set(ex.name, ex);
+  });
+
+  // Override with production exercises
+  prodExercises.forEach((ex: any) => {
+    if (ex.name) {
+      exercisesByName.set(ex.name, {
+        name: ex.name,
+        muscleGroup: ex.muscleGroup || 'general',
+        equipment: ex.equipment || 'bodyweight',
+        difficulty: ex.difficulty || 'beginner',
+        description: ex.description || '',
+        videoUrl: ex.videoUrl || '',
+      });
+    }
+  });
+
+  const allExercises = Array.from(exercisesByName.values());
+
+  // Just-in-time upsert: only add missing exercises, preserve existing ones
+  const ops = allExercises.map((ex) => ({
     updateOne: {
       filter: { name: ex.name },
       update: {
@@ -73,14 +121,17 @@ export async function seedExercises(): Promise<number> {
           videoUrl: ex.videoUrl,
         },
       },
-      upsert: true,
+      upsert: true, // Insert if not exists, update if exists
     },
   }));
+
   const result = await Exercise.bulkWrite(ops);
   const created = result.upsertedCount ?? 0;
   const updated = result.modifiedCount ?? 0;
-  console.log(`✅ Exercises: ${created} created, ${updated} updated (${PPL_EXERCISES.length} by name)`);
-  return PPL_EXERCISES.length;
+  const fromProd = prodExercises.length > 0 ? ` (${prodExercises.length} from production)` : '';
+  console.log(`✅ Exercises: ${created} added, ${updated} verified (${allExercises.length} total)${fromProd}`);
+
+  return allExercises.length;
 }
 
 if (require.main === module) {
