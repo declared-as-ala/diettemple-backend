@@ -7,11 +7,12 @@ const ATLAS_URI = 'mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/?appNam
 
 async function checkCollections() {
   try {
-    console.log('🔗 Connecting to Atlas...');
-    const atlasConn = await mongoose.createConnection(ATLAS_URI).asPromise();
+    console.log('🔗 Connecting to Atlas (diettemple database)...');
+    const atlasConn = await mongoose.createConnection(ATLAS_URI + '/diettemple').asPromise();
 
     console.log('📋 Listing all collections in Atlas...');
-    const collections = await atlasConn.db.listCollections().toArray();
+    const db = (atlasConn as any).db;
+    const collections = await db.listCollections().toArray();
 
     if (collections.length === 0) {
       console.log('❌ No collections found in Atlas database');
