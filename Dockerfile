@@ -2,7 +2,7 @@
 FROM node:20-slim AS builder
 WORKDIR /app
 COPY package*.json tsconfig.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 COPY src ./src
 RUN npm run build
 
@@ -29,7 +29,7 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 
 # Install production dependencies only
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --legacy-peer-deps --only=production
 
 # Copy built code and required assets
 COPY --from=builder /app/dist ./dist
