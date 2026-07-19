@@ -66,6 +66,7 @@ export interface ILevelTemplate extends Document {
   imageUrl?: string;
   isActive: boolean;
   gender?: 'M' | 'F' | null;
+  level: 'INITIATE' | 'FIGHTER' | 'WARRIOR' | 'CHAMPION' | 'ELITE';
   weeks: IWeekTemplate[];
   durationWeeks: number;
   minimumSessionsPerWeek?: number;
@@ -93,6 +94,12 @@ const LevelTemplateSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, index: true },
     gender: { type: String, enum: ['M', 'F'], default: 'M' },
+    level: {
+      type: String,
+      enum: ['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE'],
+      required: true,
+      index: true,
+    },
     description: { type: String },
     imageUrl: { type: String },
     isActive: { type: Boolean, default: true, index: true },

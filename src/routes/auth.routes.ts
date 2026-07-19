@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcrypt';
 import { authService } from '../services/auth.service';
+import { serializeUserForAPI } from '../services/userSerializer';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import User from '../models/User.model';
 import { processAndSaveAvatar, validateAvatarSize } from '../lib/imageProcessor';
@@ -104,8 +105,15 @@ router.post(
 // Get current user
 router.get('/me', authenticate, async (req: AuthRequest, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-passwordHash -otp -otpExpires');
-    res.json({ user });
+    const user = await User.findById(req.user._id)
+      .populate('assignedPlanId')
+      .select('-passwordHash -otp -otpExpires');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ user: serializeUserForAPI(user) });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }

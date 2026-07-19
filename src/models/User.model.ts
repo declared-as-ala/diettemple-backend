@@ -152,6 +152,16 @@ UserSchema.pre('validate', function (next) {
   }
 });
 
+// PRE-SAVE: Prevent direct level changes when plan is assigned
+// Level must be derived from the assigned plan only
+UserSchema.pre('save', function (next) {
+  if (this.isModified('level') && this.assignedPlanId) {
+    // Silently ignore level changes; it will be populated from the plan during serialization
+    this.level = undefined;
+  }
+  next();
+});
+
 export default mongoose.model<IUser>('User', UserSchema);
 
 
