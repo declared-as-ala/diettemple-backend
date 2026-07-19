@@ -1,0 +1,1160 @@
+[
+  {
+    "_id": "6a4ba0e1c1605cd32d56a88b",
+    "title": "INI_Full_S1_A_H/F_V1",
+    "items": [
+      {
+        "exerciseId": "69aab7174be28d3a4045e7ee",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4e4a96c1605cd32d56aac9"
+      },
+      {
+        "exerciseId": "69aabc074be28d3a4045e886",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4e4a96c1605cd32d56aaca"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4e4a96c1605cd32d56aacb"
+      },
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4e4a96c1605cd32d56aacc"
+      },
+      {
+        "exerciseId": "69a98f574be28d3a4045e2e8",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4e4a96c1605cd32d56aacd"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4e4a96c1605cd32d56aace"
+      },
+      {
+        "exerciseId": "69a996c44be28d3a4045e397",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4e4a96c1605cd32d56aacf"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-06T12:34:41.174Z",
+    "updatedAt": "2026-07-08T13:03:18.480Z",
+    "__v": 2
+  },
+  {
+    "_id": "6a4cf60fc1605cd32d56a8aa",
+    "title": "INI_Full_S1_A_H/F_V2",
+    "items": [
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d3",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4e4d4bc1605cd32d56abe2"
+      },
+      {
+        "exerciseId": "69aab59b4be28d3a4045e7e2",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4e4d4bc1605cd32d56abe3"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4e4d4bc1605cd32d56abe4"
+      },
+      {
+        "exerciseId": "69a99dd24be28d3a4045e3d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4e4d4bc1605cd32d56abe5"
+      },
+      {
+        "exerciseId": "69a98f574be28d3a4045e2e8",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4e4d4bc1605cd32d56abe6"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4e4d4bc1605cd32d56abe7"
+      },
+      {
+        "exerciseId": "69a994fb4be28d3a4045e361",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4e4d4bc1605cd32d56abe8"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-07T12:50:23.019Z",
+    "updatedAt": "2026-07-08T13:14:51.029Z",
+    "__v": 2
+  },
+  {
+    "_id": "6a4e4d53c1605cd32d56abf1",
+    "title": "INI_Upper_S1/S2_A_H",
+    "items": [
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a5786e7c1605cd32d56bc37"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a5786e7c1605cd32d56bc38"
+      },
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a5786e7c1605cd32d56bc39"
+      },
+      {
+        "exerciseId": "69a99dd24be28d3a4045e3d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a5786e7c1605cd32d56bc3a"
+      },
+      {
+        "exerciseId": "69a98f574be28d3a4045e2e8",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a5786e7c1605cd32d56bc3b"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a5786e7c1605cd32d56bc3c"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09c3",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a5786e7c1605cd32d56bc3d"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-08T13:14:59.444Z",
+    "updatedAt": "2026-07-15T13:11:03.657Z",
+    "__v": 3
+  },
+  {
+    "_id": "6a4e4f35c1605cd32d56ad11",
+    "title": "INI_Legs_S1/S2_A_H/F",
+    "items": [
+      {
+        "exerciseId": "69aab7174be28d3a4045e7ee",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4e527dc1605cd32d56adbc"
+      },
+      {
+        "exerciseId": "69aabc074be28d3a4045e886",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4e527dc1605cd32d56adbd"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d8",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4e527dc1605cd32d56adbe"
+      },
+      {
+        "exerciseId": "69aaba784be28d3a4045e856",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4e527dc1605cd32d56adbf"
+      },
+      {
+        "exerciseId": "69aabaf14be28d3a4045e86e",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4e527dc1605cd32d56adc0"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09dc",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4e527dc1605cd32d56adc1"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-08T13:23:01.091Z",
+    "updatedAt": "2026-07-08T13:37:01.793Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4e55e0c1605cd32d56add9",
+    "title": "INI_Upper_S3/S4_A_H",
+    "items": [
+      {
+        "exerciseId": "69a98acc4be28d3a4045e25c",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f8003c1605cd32d56b365"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f8003c1605cd32d56b366"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f8003c1605cd32d56b367"
+      },
+      {
+        "exerciseId": "69a98f574be28d3a4045e2e8",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f8003c1605cd32d56b368"
+      },
+      {
+        "exerciseId": "69a99dd24be28d3a4045e3d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f8003c1605cd32d56b369"
+      },
+      {
+        "exerciseId": "69a9a6dd4be28d3a4045e4bb",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4f8003c1605cd32d56b36a"
+      },
+      {
+        "exerciseId": "69a996c44be28d3a4045e397",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4f8003c1605cd32d56b36b"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4f8003c1605cd32d56b36c"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-08T13:51:28.300Z",
+    "updatedAt": "2026-07-09T11:03:31.873Z",
+    "__v": 3
+  },
+  {
+    "_id": "6a4f7c6dc1605cd32d56b128",
+    "title": "INI_PUSH_S4/S5_A_H",
+    "items": [
+      {
+        "exerciseId": "69a98acc4be28d3a4045e25c",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f7d6fc1605cd32d56b1d6"
+      },
+      {
+        "exerciseId": "69a98c284be28d3a4045e28c",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f7d6fc1605cd32d56b1d7"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f7d6fc1605cd32d56b1d8"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09bc",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f7d6fc1605cd32d56b1d9"
+      },
+      {
+        "exerciseId": "69a991f74be28d3a4045e305",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f7d6fc1605cd32d56b1da"
+      },
+      {
+        "exerciseId": "69a9933a4be28d3a4045e341",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4f7d6fc1605cd32d56b1db"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09c3",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4f7d6fc1605cd32d56b1dc"
+      },
+      {
+        "exerciseId": "69a994fb4be28d3a4045e361",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4f7d6fc1605cd32d56b1dd"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T10:48:13.542Z",
+    "updatedAt": "2026-07-09T10:52:31.848Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4f7da6c1605cd32d56b1e6",
+    "title": "INI_PULL_S4/S5_A_H",
+    "items": [
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f7f9fc1605cd32d56b334"
+      },
+      {
+        "exerciseId": "69a99dd24be28d3a4045e3d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f7f9fc1605cd32d56b335"
+      },
+      {
+        "exerciseId": "69a9a4424be28d3a4045e456",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f7f9fc1605cd32d56b336"
+      },
+      {
+        "exerciseId": "69a9a47f4be28d3a4045e462",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f7f9fc1605cd32d56b337"
+      },
+      {
+        "exerciseId": "69a9a7a44be28d3a4045e4df",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f7f9fc1605cd32d56b338"
+      },
+      {
+        "exerciseId": "69a9aaf34be28d3a4045e4f7",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4f7f9fc1605cd32d56b339"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4f7f9fc1605cd32d56b33a"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T10:53:26.762Z",
+    "updatedAt": "2026-07-09T11:01:51.244Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4f847bc1605cd32d56b390",
+    "title": "INI_UpperB_S5_A_H",
+    "items": [
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f986fc1605cd32d56b5bc"
+      },
+      {
+        "exerciseId": "69a9a3784be28d3a4045e43e",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f986fc1605cd32d56b5bd"
+      },
+      {
+        "exerciseId": "69a9a0014be28d3a4045e3ee",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f986fc1605cd32d56b5be"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f986fc1605cd32d56b5bf"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f986fc1605cd32d56b5c0"
+      },
+      {
+        "exerciseId": "69a9a7344be28d3a4045e4c7",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4f986fc1605cd32d56b5c1"
+      },
+      {
+        "exerciseId": "69a9ab3b4be28d3a4045e503",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4f986fc1605cd32d56b5c2"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4f986fc1605cd32d56b5c3"
+      },
+      {
+        "exerciseId": "69a996c44be28d3a4045e397",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 8,
+        "_id": "6a4f986fc1605cd32d56b5c4"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T11:22:35.698Z",
+    "updatedAt": "2026-07-09T12:47:43.329Z",
+    "__v": 2
+  },
+  {
+    "_id": "6a4f97adc1605cd32d56b4cb",
+    "title": "INI_UpperC_S5_A_H",
+    "items": [
+      {
+        "exerciseId": "69a98acc4be28d3a4045e25c",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f9822c1605cd32d56b555"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f9822c1605cd32d56b556"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f9822c1605cd32d56b557"
+      },
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f9822c1605cd32d56b558"
+      },
+      {
+        "exerciseId": "69a9a3784be28d3a4045e43e",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f9822c1605cd32d56b559"
+      },
+      {
+        "exerciseId": "69a9926d4be28d3a4045e329",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4f9822c1605cd32d56b55a"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09c0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4f9822c1605cd32d56b55b"
+      },
+      {
+        "exerciseId": "69a996c44be28d3a4045e397",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4f9822c1605cd32d56b55c"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 8,
+        "_id": "6a4f9822c1605cd32d56b55d"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T12:44:29.016Z",
+    "updatedAt": "2026-07-09T12:46:26.273Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4f9c11c1605cd32d56b5d6",
+    "title": "INI_LEGS_S3/S4/S5_A_H/F",
+    "items": [
+      {
+        "exerciseId": "69aab7174be28d3a4045e7ee",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f9e8cc1605cd32d56b64a"
+      },
+      {
+        "exerciseId": "69aab7a94be28d3a4045e806",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f9e8cc1605cd32d56b64b"
+      },
+      {
+        "exerciseId": "69aabc074be28d3a4045e886",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f9e8cc1605cd32d56b64c"
+      },
+      {
+        "exerciseId": "69aab59b4be28d3a4045e7e2",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f9e8cc1605cd32d56b64d"
+      },
+      {
+        "exerciseId": "69aaba784be28d3a4045e856",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f9e8cc1605cd32d56b64e"
+      },
+      {
+        "exerciseId": "69aabaf14be28d3a4045e86e",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4f9e8cc1605cd32d56b64f"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09dc",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4f9e8cc1605cd32d56b650"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T13:03:13.983Z",
+    "updatedAt": "2026-07-09T13:13:48.310Z",
+    "__v": 2
+  },
+  {
+    "_id": "6a4f9ebcc1605cd32d56b659",
+    "title": "INI_LegsG_S2/3/4_A_F",
+    "items": [
+      {
+        "exerciseId": "69aab7a94be28d3a4045e806",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4f9fe5c1605cd32d56b6ce"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d9",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4f9fe5c1605cd32d56b6cf"
+      },
+      {
+        "exerciseId": "69aaba244be28d3a4045e84a",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4f9fe5c1605cd32d56b6d0"
+      },
+      {
+        "exerciseId": "69aaba784be28d3a4045e856",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4f9fe5c1605cd32d56b6d1"
+      },
+      {
+        "exerciseId": "69aabab44be28d3a4045e862",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4f9fe5c1605cd32d56b6d2"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T13:14:36.184Z",
+    "updatedAt": "2026-07-09T13:19:33.997Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4fa35ec1605cd32d56b6e4",
+    "title": "INI_LegsG_S5_A_F",
+    "items": [
+      {
+        "exerciseId": "69aab9d84be28d3a4045e836",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4fa3b7c1605cd32d56b729"
+      },
+      {
+        "exerciseId": "69aab7a94be28d3a4045e806",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4fa3b7c1605cd32d56b72a"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d7",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4fa3b7c1605cd32d56b72b"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d9",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4fa3b7c1605cd32d56b72c"
+      },
+      {
+        "exerciseId": "69aaba784be28d3a4045e856",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4fa3b7c1605cd32d56b72d"
+      },
+      {
+        "exerciseId": "69aabab44be28d3a4045e862",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4fa3b7c1605cd32d56b72e"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T13:34:22.832Z",
+    "updatedAt": "2026-07-09T13:35:51.534Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4fa3cbc1605cd32d56b737",
+    "title": "INI_UpperF_S1/2/3_A_F",
+    "items": [
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4fa58ac1605cd32d56b7d3"
+      },
+      {
+        "exerciseId": "69a99dd24be28d3a4045e3d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4fa58ac1605cd32d56b7d4"
+      },
+      {
+        "exerciseId": "69a9a6dd4be28d3a4045e4bb",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4fa58ac1605cd32d56b7d5"
+      },
+      {
+        "exerciseId": "69a9a7a44be28d3a4045e4df",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4fa58ac1605cd32d56b7d6"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4fa58ac1605cd32d56b7d7"
+      },
+      {
+        "exerciseId": "69a98f574be28d3a4045e2e8",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4fa58ac1605cd32d56b7d8"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4fa58ac1605cd32d56b7d9"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09c3",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4fa58ac1605cd32d56b7da"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T13:36:11.456Z",
+    "updatedAt": "2026-07-09T13:43:38.123Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4fa76fc1605cd32d56b831",
+    "title": "INI_UpperF_S1/2/3_A_F_V2",
+    "items": [
+      {
+        "exerciseId": "69a9a0014be28d3a4045e3ee",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4fa874c1605cd32d56b90d"
+      },
+      {
+        "exerciseId": "69a99dd24be28d3a4045e3d1",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4fa874c1605cd32d56b90e"
+      },
+      {
+        "exerciseId": "69a9a4424be28d3a4045e456",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4fa874c1605cd32d56b90f"
+      },
+      {
+        "exerciseId": "69a9a47f4be28d3a4045e462",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4fa874c1605cd32d56b910"
+      },
+      {
+        "exerciseId": "69a9a7a44be28d3a4045e4df",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4fa874c1605cd32d56b911"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4fa874c1605cd32d56b912"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4fa874c1605cd32d56b913"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09c3",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4fa874c1605cd32d56b914"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T13:51:43.956Z",
+    "updatedAt": "2026-07-09T13:56:04.261Z",
+    "__v": 1
+  },
+  {
+    "_id": "6a4fa8aac1605cd32d56b91d",
+    "title": "INI_UpperF_S4/5_A_F",
+    "items": [
+      {
+        "exerciseId": "69a9a1844be28d3a4045e412",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 0,
+        "_id": "6a4fa98cc1605cd32d56b9bf"
+      },
+      {
+        "exerciseId": "69a9a3784be28d3a4045e43e",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 1,
+        "_id": "6a4fa98cc1605cd32d56b9c0"
+      },
+      {
+        "exerciseId": "69a9a4424be28d3a4045e456",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 2,
+        "_id": "6a4fa98cc1605cd32d56b9c1"
+      },
+      {
+        "exerciseId": "69a9a7344be28d3a4045e4c7",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 3,
+        "_id": "6a4fa98cc1605cd32d56b9c2"
+      },
+      {
+        "exerciseId": "69a9a47f4be28d3a4045e462",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 4,
+        "_id": "6a4fa98cc1605cd32d56b9c3"
+      },
+      {
+        "exerciseId": "69a98b264be28d3a4045e268",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 5,
+        "_id": "6a4fa98cc1605cd32d56b9c4"
+      },
+      {
+        "exerciseId": "69a98bd84be28d3a4045e280",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 6,
+        "_id": "6a4fa98cc1605cd32d56b9c5"
+      },
+      {
+        "exerciseId": "69a9926d4be28d3a4045e329",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 7,
+        "_id": "6a4fa98cc1605cd32d56b9c6"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09d0",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 8,
+        "_id": "6a4fa98cc1605cd32d56b9c7"
+      },
+      {
+        "exerciseId": "69c060bbb58cabb8598d09c3",
+        "alternatives": [],
+        "sets": 3,
+        "targetReps": 10,
+        "progressionRules": [],
+        "order": 9,
+        "_id": "6a4fa98cc1605cd32d56b9c8"
+      }
+    ],
+    "tags": [],
+    "createdAt": "2026-07-09T13:56:58.477Z",
+    "updatedAt": "2026-07-09T14:00:44.083Z",
+    "__v": 1
+  }
+]

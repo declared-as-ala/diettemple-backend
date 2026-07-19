@@ -1,14 +1,16 @@
 /**
  * Seed session templates - Just-In-Time approach
- * Fetches from production MongoDB, merges with fallback PPL sessions
+ * Fetches from production MongoDB, merges with exported Atlas sessions
  * Only adds missing sessions (non-destructive)
  *
- * Production Database: mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/?appName=Cluster0
+ * Production Database: mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/diettemple
  */
 import Exercise from '../models/Exercise.model';
 import SessionTemplate from '../models/SessionTemplate.model';
 import { runSeed } from './runSeed';
 import mongoose from 'mongoose';
+import fs from 'fs';
+import path from 'path';
 
 const PROGRESSION_RULE = {
   condition: 'reps_above',
@@ -36,7 +38,21 @@ function item(
 
 async function fetchProductionSessions(): Promise<any[]> {
   try {
-    const PROD_URI = 'mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/?appName=Cluster0';
+    // First try to load from exported JSON file
+    const jsonPath = path.join(__dirname, '../../data/atlas-sessions.json');
+    if (fs.existsSync(jsonPath)) {
+      const jsonData = fs.readFileSync(jsonPath, 'utf-8');
+      const sessions = JSON.parse(jsonData);
+      console.log(`📥 Loaded ${sessions.length} sessions from exported Atlas JSON`);
+      return sessions || [];
+    }
+  } catch (err) {
+    console.warn('⚠️  Could not load from JSON:', (err as Error).message);
+  }
+
+  // Fallback to fetching from production MongoDB
+  try {
+    const PROD_URI = 'mongodb+srv://ala:ala123@cluster0.tojwjkt.mongodb.net/diettemple';
     const prodConn = await mongoose.createConnection(PROD_URI).asPromise();
     const prodSessionsCollection = prodConn.collection('sessiontemplates');
     const sessions = await prodSessionsCollection.find({}).toArray();
@@ -44,7 +60,7 @@ async function fetchProductionSessions(): Promise<any[]> {
     console.log(`📥 Fetched ${sessions.length} sessions from production MongoDB`);
     return sessions || [];
   } catch (err) {
-    console.warn('⚠️  Could not fetch sessions from production DB, using fallback:', (err as Error).message);
+    console.warn('⚠️  Could not fetch sessions from production DB:', (err as Error).message);
     return [];
   }
 }
