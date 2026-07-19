@@ -71,7 +71,7 @@ async function fetchProductionExercises(): Promise<any[]> {
     const prodConn = await mongoose.createConnection(PROD_URI).asPromise();
     const prodExercisesCollection = prodConn.collection('exercises');
     const exercises = await prodExercisesCollection.find({}).toArray();
-    await prodConn.disconnect();
+    await prodConn.close();
     console.log(`📥 Fetched ${exercises.length} exercises from production MongoDB`);
     return exercises || [];
   } catch (err) {

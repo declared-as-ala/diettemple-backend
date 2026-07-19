@@ -40,7 +40,7 @@ async function fetchProductionSessions(): Promise<any[]> {
     const prodConn = await mongoose.createConnection(PROD_URI).asPromise();
     const prodSessionsCollection = prodConn.collection('sessiontemplates');
     const sessions = await prodSessionsCollection.find({}).toArray();
-    await prodConn.disconnect();
+    await prodConn.close();
     console.log(`📥 Fetched ${sessions.length} sessions from production MongoDB`);
     return sessions || [];
   } catch (err) {

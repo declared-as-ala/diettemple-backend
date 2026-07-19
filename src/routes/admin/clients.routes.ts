@@ -145,14 +145,22 @@ router.post(
     body('poids').optional().isString(),
     body('objectif').optional().isString(),
     body('fitnessLevel').optional().isIn(['A', 'B']),
+    body('assignedPlanId').optional().isMongoId(),
     body('bodyComposition').optional().isObject(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
-      const { name, email, phone, password, sexe, age, taille, poids, objectif, fitnessLevel, bodyComposition } = req.body;
+      const { name, email, phone, password, sexe, age, taille, poids, objectif, fitnessLevel, assignedPlanId, bodyComposition } = req.body;
       if (!email && !phone) return res.status(400).json({ message: 'Either email or phone is required' });
+
+      // Validate assignedPlanId exists if provided
+      if (assignedPlanId) {
+        const plan = await LevelTemplate.findById(assignedPlanId);
+        if (!plan) return res.status(400).json({ message: 'Plan not found' });
+      }
+
       const bcrypt = await import('bcrypt');
       const existing = await User.findOne(email ? { email: email.toLowerCase() } : { phone: phone?.trim() });
       if (existing) return res.status(400).json({ message: email ? 'Email already in use' : 'Phone already in use' });
@@ -169,6 +177,7 @@ router.post(
         poids,
         objectif,
         fitnessLevel,
+        assignedPlanId: assignedPlanId || undefined,
         bodyComposition: bodyComposition ? {
           bodyFatPercentage: bodyComposition.bodyFatPercentage,
           muscleMassPercentage: bodyComposition.muscleMassPercentage,
@@ -181,7 +190,7 @@ router.post(
           actorAdminId: req.user._id,
           targetUserId: user._id,
           actionType: 'client_created',
-          metadata: { name: user.name, email: user.email },
+          metadata: { name: user.name, email: user.email, planId: assignedPlanId },
         });
       }
       res.status(201).json({ client: doc });
