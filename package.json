@@ -33,6 +33,7 @@
     "test:exercise-recommendation": "ts-node src/services/exerciseRecommendation.service.test.ts",
     "test:recipe-filters": "ts-node src/services/recipeFilter.service.test.ts",
     "migrate:recipes:meal-prep": "ts-node src/scripts/migrateRecipesForMealPrep.ts",
+    "migrate:atlas-to-local": "ts-node src/scripts/migrate-atlas-to-local.ts",
     "reset:db": "ts-node src/scripts/resetDb.ts",
     "scrape:protein-tn": "node scrape-protein-tn.js",
     "test:gym-meal": "node scripts/test-gym-meal-endpoints.js",
