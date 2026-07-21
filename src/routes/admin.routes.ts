@@ -1159,8 +1159,11 @@ router.get(
   ],
   async (req: AuthRequest, res: Response) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
+
       const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
       const skip = (page - 1) * limit;
 
       const filter: any = {};
