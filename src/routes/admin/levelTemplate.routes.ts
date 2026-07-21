@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { body, param, query } from 'express-validator';
+import { body, param, query, validationResult } from 'express-validator';
 import LevelTemplate from '../../models/LevelTemplate.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
 
@@ -89,13 +89,21 @@ router.post(
   '/',
   [
     body('name').notEmpty().trim().withMessage('Name is required'),
+    body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
     body('description').optional().isString(),
     body('imageUrl').optional().isString(),
     body('isActive').optional().isBoolean(),
     body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
+    body('minimumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('minimumSessionsPerWeek must be 1-7'),
+    body('maximumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('maximumSessionsPerWeek must be 1-7'),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
       const gender = req.body.gender ?? 'M';
       const existing = await LevelTemplate.findOne({ name: req.body.name, gender });
       if (existing) {
@@ -110,6 +118,7 @@ router.post(
 
       const plan = await LevelTemplate.create({
         name: req.body.name,
+        level: req.body.level || 'INITIATE',
         description: req.body.description,
         imageUrl: req.body.imageUrl,
         isActive: req.body.isActive !== false,
@@ -132,15 +141,24 @@ router.put(
   '/:id',
   [
     param('id').isMongoId(),
+    body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
     body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
+    body('minimumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('minimumSessionsPerWeek must be 1-7'),
+    body('maximumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('maximumSessionsPerWeek must be 1-7'),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ message: errors.array()[0].msg });
+      }
+
       const plan = await LevelTemplate.findById(req.params.id);
       if (!plan) {
         return res.status(404).json({ message: 'Level template not found' });
       }
       if (req.body.name != null) plan.name = req.body.name;
+      if (req.body.level !== undefined) plan.level = req.body.level;
       if (req.body.description != null) plan.description = req.body.description;
       if (req.body.imageUrl !== undefined) plan.imageUrl = req.body.imageUrl;
       if (req.body.isActive != null) plan.isActive = req.body.isActive;
