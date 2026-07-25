@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import LevelTemplate from '../../models/LevelTemplate.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
+import { resolveWeekSessions, legacyDayKeyFromOffset } from '../../services/planSchedule.service';
 
 const router = Router();
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
@@ -200,7 +201,25 @@ router.put(
   }
 );
 
+/**
+ * Builds the legacy `days.mon..sun` map from an ordered `sessions[]` array, so both
+ * shapes always stay in sync server-side (offset % 7 -> DAY_KEYS[offset % 7]).
+ */
+function daysFromSessions(sessions: Array<{ sessionTemplateId: any; recommendedDayOffset: number }>) {
+  const days: Record<(typeof DAY_KEYS)[number], Array<{ sessionTemplateId: any; order: number }>> = {
+    mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [],
+  };
+  sessions.forEach((s, idx) => {
+    const key = legacyDayKeyFromOffset(s.recommendedDayOffset);
+    days[key].push({ sessionTemplateId: s.sessionTemplateId, order: idx });
+  });
+  return days;
+}
+
 // PUT /level-templates/:id/weeks
+// Accepts weeks in either shape: the new ordered `sessions[]` (source of truth going
+// forward) or the legacy `days.mon..sun` map. Whichever is provided, both are derived
+// and stored, so every existing reader of `days{}` keeps working unchanged.
 router.put(
   '/:id/weeks',
   [param('id').isMongoId(), body('weeks').isArray().withMessage('weeks must be an array')],
@@ -210,15 +229,38 @@ router.put(
       if (!plan) {
         return res.status(404).json({ message: 'Level template not found' });
       }
-      
+
       const validation = validateWeeks(req.body.weeks, plan.durationWeeks || 5);
       if (!validation.valid) {
         return res.status(400).json({ message: validation.message });
       }
 
-      const weeks = req.body.weeks.map((w: Record<string, any>) => ({
-        weekNumber: w.weekNumber,
-        days: {
+      const weeks = req.body.weeks.map((w: Record<string, any>) => {
+        const hasNewSessions = Array.isArray(w.sessions);
+        const isRestWeek = !!w.isRestWeek;
+
+        if (hasNewSessions) {
+          const sessions = (w.sessions as any[])
+            .filter((s) => s?.sessionTemplateId)
+            .map((s, idx) => ({
+              sessionTemplateId: s.sessionTemplateId,
+              sessionOrder: s.sessionOrder ?? idx + 1,
+              recommendedDayOffset: s.recommendedDayOffset ?? 0,
+              restDaysAfterPrevious: s.restDaysAfterPrevious,
+            }))
+            .sort((a, b) => a.sessionOrder - b.sessionOrder);
+          return {
+            weekNumber: w.weekNumber,
+            sessions,
+            days: daysFromSessions(sessions),
+            minimumCompletedSessions: isRestWeek ? 0 : (w.minimumCompletedSessions ?? sessions.length),
+            isRestWeek,
+          };
+        }
+
+        // Legacy caller: only `days{}` provided. Store it as-is and derive `sessions[]`
+        // so week-progress/catch-up services still schedule correctly for this week.
+        const days = {
           mon: (w.days?.mon || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
           tue: (w.days?.tue || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
           wed: (w.days?.wed || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
@@ -226,12 +268,23 @@ router.put(
           fri: (w.days?.fri || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
           sat: (w.days?.sat || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
           sun: (w.days?.sun || []).map((p: any) => ({ sessionTemplateId: p.sessionTemplateId, note: p.note, order: p.order, divisionId: p.divisionId })),
-        },
-      }));
+        };
+        const derivedSessions = resolveWeekSessions({ weekNumber: w.weekNumber, days } as any);
+        return {
+          weekNumber: w.weekNumber,
+          days,
+          sessions: derivedSessions.length > 0 ? derivedSessions : undefined,
+          minimumCompletedSessions: isRestWeek ? 0 : (w.minimumCompletedSessions ?? (derivedSessions.length || undefined)),
+          isRestWeek,
+        };
+      });
       plan.weeks = weeks;
       await plan.save();
       res.json({ levelTemplate: plan.toObject() });
     } catch (err: unknown) {
+      if ((err as any)?.name === 'ValidationError') {
+        return res.status(400).json({ message: (err as Error).message });
+      }
       res.status(500).json({ message: (err as Error).message });
     }
   }

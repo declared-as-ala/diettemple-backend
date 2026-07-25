@@ -9,6 +9,7 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import PlanAssignment from '../../models/PlanAssignment.model';
 import LevelTemplate from '../../models/LevelTemplate.model';
 import WorkoutSession from '../../models/WorkoutSession.model';
+import { calculateTrainingWeekProgress } from '../../services/weeklyProgress.service';
 const router = Router();
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
@@ -180,6 +181,19 @@ router.get(
       const diff = Math.floor((todayMs - startMs) / MS_PER_DAY);
       const currWk = Math.max(0, Math.min(durationWeeks - 1, Math.floor(diff / 7)));
 
+      // Additive: per-week pass/fail/catch-up status via the centralized service
+      // (same one /me/plan/week uses) — coach dashboard view of relative-cycle progress.
+      let weekProgress: Array<Awaited<ReturnType<typeof calculateTrainingWeekProgress>>> = [];
+      try {
+        weekProgress = await Promise.all(
+          Array.from({ length: durationWeeks }, (_, i) =>
+            calculateTrainingWeekProgress(userId, (assignment as any)._id, i + 1)
+          )
+        );
+      } catch {
+        weekProgress = [];
+      }
+
       res.json({
         assignment: {
           id: String((assignment as any)._id),
@@ -203,6 +217,8 @@ router.get(
           remainingDays: remDays,
           status: todayMs > planEndMs ? 'expired' : todayMs < startMs ? 'not_started' : 'active',
         },
+        // additive
+        weekProgress,
       });
     } catch (e: unknown) {
       res.status(500).json({ message: (e as Error).message });

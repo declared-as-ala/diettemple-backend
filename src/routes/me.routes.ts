@@ -22,20 +22,23 @@ import WorkoutSession from '../models/WorkoutSession.model';
 import PlanAssignment from '../models/PlanAssignment.model';
 import LevelHomeContent from '../models/LevelHomeContent.model';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { calculateWeeklyValidation } from '../services/weeklyValidation.service';
 import bcrypt from 'bcrypt';
 import { deleteUserAccount } from '../services/accountDeletion.service';
+import {
+  MS_PER_DAY,
+  PLAN_DAY_KEYS,
+  PlanDayKey as PlanTemplateDayKey,
+  utcStartOfCalendarDate,
+  utcDateKey,
+  getPlanDayPosition,
+  getWeekWindow,
+} from '../utils/scheduleDate';
+import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
+import { findMostRecentOverdueSession, findOverdueSessions } from '../services/catchUp.service';
+import { calculateTrainingWeekProgress } from '../services/weeklyProgress.service';
 
 const router = Router();
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-/**
- * Level template + GET /plan/week use positional keys: "mon" = day 0 of each program week
- * (first day after planStart), NOT necessarily a real Monday. Must match plan/week loop:
- * dayKeys[i] for i = 0..6 with dayDate = planStart + (weekNumber-1)*7 + i.
- */
-const PLAN_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
-type PlanTemplateDayKey = (typeof PLAN_DAY_KEYS)[number];
 
 /**
  * Parse YYYY-MM-DD as the user's intended calendar day (from mobile local date).
@@ -68,31 +71,6 @@ function parseCalendarDateForMeToday(dateStr: string): {
     endOfDay,
     dayName: DAY_NAMES[utcDow],
   };
-}
-
-/** Slot within a Mon–Sun week: diffDays from program anchor Monday; 0 → mon. */
-function planTemplateDayKeyFromDiffDays(diffDays: number): PlanTemplateDayKey {
-  const idx = ((diffDays % 7) + 7) % 7;
-  return PLAN_DAY_KEYS[idx];
-}
-
-/** Start of calendar day in UTC (for subscription start alignment). */
-function utcStartOfCalendarDate(d: Date): number {
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-/**
- * Monday 00:00 UTC of the week that contains `d`'s UTC calendar date.
- * Admin planner labels LUN→DIM as real Mon→Sun; template keys mon..sun must match that,
- * not "day 0 = subscription start" rolling weeks.
- */
-function utcMondayStartOfWeekContaining(d: Date): number {
-  const ms = utcStartOfCalendarDate(d);
-  const dow = new Date(ms).getUTCDay(); // 0 Sun … 6 Sat
-  const daysSinceMonday = dow === 0 ? 6 : dow - 1;
-  return ms - daysSinceMonday * MS_PER_DAY;
 }
 
 /** Calendar days from today (server start-of-day) to endAt start-of-day. Can be negative if expired. */
@@ -130,17 +108,6 @@ function getLastActionFromHistory(history: { action: string; date: Date }[] | un
   return displayAction ? { action: displayAction, date: last.date } : null;
 }
 
-/**
- * UTC-keyed YYYY-MM-DD for a given Date (matches dateToKeyUtc, declared earlier in file).
- * Inlined helper here so this code can sit before dateToKeyUtc declaration.
- */
-function utcDateKey(d: Date): string {
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 function normalizeSessionTitle(raw: unknown): string {
   if (typeof raw !== 'string') return 'Séance du jour';
   const title = raw.trim();
@@ -165,15 +132,6 @@ function normalizePlanStartDate(raw: Date): Date {
   const d = new Date(raw);
   d.setUTCHours(0, 0, 0, 0);
   return d;
-}
-
-function getPlanDayPosition(target: Date, planStart: Date): { diffDays: number; weekIndex: number; dayIndex: number } {
-  const startMs = utcStartOfCalendarDate(planStart);
-  const targetMs = utcStartOfCalendarDate(target);
-  const diffDays = Math.floor((targetMs - startMs) / MS_PER_DAY);
-  const weekIndex = Math.floor(diffDays / 7);
-  const dayIndex = ((diffDays % 7) + 7) % 7;
-  return { diffDays, weekIndex, dayIndex };
 }
 
 /**
@@ -221,50 +179,6 @@ async function loadCompletedSessionsByDateKey(
     }
   }
   return { dateKeySet, sessionsByDateKey, completedOriginalDateKeys };
-}
-
-/**
- * For a given user with a level template plan, walk back up to `lookbackDays` days from `today`
- * and return the most recent scheduled (non-rest) day that has NO completed WorkoutSession.
- * Used to surface "Séance à rattraper" when today is rest or already done.
- */
-async function findMostRecentMissedSession(
-  userId: unknown,
-  levelDoc: any,
-  subStartAt: Date,
-  today: Date,
-  completedDateKeys: Set<string>,
-  lookbackDays = 14,
-  completedOriginalDateKeys: Set<string> = new Set()
-): Promise<{ sessionTemplateId: string; originalDate: string; dayName: string } | null> {
-  if (!levelDoc?.weeks?.length) return null;
-  const planStartMs = utcStartOfCalendarDate(normalizePlanStartDate(new Date(subStartAt)));
-  const todayUtcMs = utcStartOfCalendarDate(today);
-  for (let back = 1; back <= lookbackDays; back++) {
-    const dayMs = todayUtcMs - back * MS_PER_DAY;
-    if (dayMs < planStartMs) break; // before plan start
-    const diffDays = Math.floor((dayMs - planStartMs) / MS_PER_DAY);
-    const weekN = Math.floor(diffDays / 7) + 1;
-    if (weekN < 1 || weekN > 5) continue;
-    const tplKey = planTemplateDayKeyFromDiffDays(diffDays);
-    const week = levelDoc.weeks.find((w: any) => w.weekNumber === weekN);
-    const placements = week?.days?.[tplKey] || [];
-    const firstPlacement = placements[0];
-    const stid = firstPlacement?.sessionTemplateId
-      ? String(firstPlacement.sessionTemplateId)
-      : null;
-    if (!stid) continue; // rest day, keep walking back
-    const dateKey = utcDateKey(new Date(dayMs));
-    if (completedDateKeys.has(dateKey)) continue; // completed on the actual day
-    if (completedOriginalDateKeys.has(dateKey)) continue; // rattrapaged on a different day
-    const dayDate = new Date(dayMs);
-    return {
-      sessionTemplateId: stid,
-      originalDate: dateKey,
-      dayName: DAY_NAMES[dayDate.getUTCDay()],
-    };
-  }
-  return null;
 }
 
 // DELETE /api/me/account — permanently delete the authenticated user's account.
@@ -354,6 +268,10 @@ router.get(
       let weekNumber = 1;
       /** True when subscription is tied to a level template with weeks (admin 5-week plan). */
       let hasLevelTemplatePlan = false;
+      /** Additive: minimum completed sessions to validate the current week (spec §6/§7). */
+      let minimumCompletedSessionsForWeek: number | null = null;
+      /** Additive: whether the current week is an explicit rest week. */
+      let isRestWeek = false;
 
       // ── 1. Load plan sources — PlanAssignment (preferred) or Subscription (legacy) ──
       // PlanAssignment is the authoritative source for the 5-week workout plan.
@@ -404,18 +322,35 @@ router.get(
             const week = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
             const placements = week?.days?.[templateDayKey] || [];
             const firstPlacement = placements[0];
+            isRestWeek = !!week?.isRestWeek;
+            const orderedSessions = resolveWeekSessions(week);
+            minimumCompletedSessionsForWeek = isRestWeek
+              ? 0
+              : week?.minimumCompletedSessions ?? (levelDoc as any)?.minimumSessionsPerWeek ?? orderedSessions.length;
             if (firstPlacement?.sessionTemplateId) {
               const session = await SessionTemplate.findById(firstPlacement.sessionTemplateId)
                 .select('title durationMinutes difficulty items')
                 .lean();
               if (session) {
                 const items = (session as any).items ?? [];
+                const matchedOrdered = orderedSessions.find(
+                  (s) => String(s.sessionTemplateId) === String((session as any)._id)
+                );
+                const schedule = matchedOrdered
+                  ? computeSessionSchedule(effectivePlanStart!, weekNumber, matchedOrdered, {
+                      catchUpWindowHours: (levelDoc as any)?.catchUpWindowHours,
+                    })
+                  : null;
                 todaySession = {
                   sessionTemplateId: (session as any)._id,
                   title: normalizeSessionTitle((session as any).title),
                   durationMinutes: (session as any).durationMinutes,
                   difficulty: (session as any).difficulty,
                   exerciseCount: Array.isArray(items) ? items.length : 0,
+                  sessionOrder: matchedOrdered?.sessionOrder ?? null,
+                  recommendedDayOffset: matchedOrdered?.recommendedDayOffset ?? dayIndex,
+                  recommendedAt: schedule?.recommendedAt ?? null,
+                  dueAt: schedule?.dueAt ?? null,
                 };
               }
             }
@@ -524,6 +459,10 @@ router.get(
         exerciseCount?: number;
         originalDate: string;
         dayName: string;
+        weekNumber?: number;
+        sessionOrder?: number;
+        recommendedAt?: Date;
+        dueAt?: Date;
       };
       let completed = false;
       let completedRattrapage = false;
@@ -543,15 +482,13 @@ router.get(
         // Always search for a missed session regardless of today's session state
         if (effectiveLevelId && hasLevelTemplatePlan && effectivePlanStart) {
           const levelDoc = await LevelTemplate.findById(effectiveLevelId).lean();
-          const missed = await findMostRecentMissedSession(
+          const missed = await findMostRecentOverdueSession({
             userId,
-            levelDoc,
-            effectivePlanStart,
-            today,
-            dateKeySet,
-            14,
-            completedOriginalDateKeys
-          );
+            levelDoc: levelDoc as any,
+            planStart: effectivePlanStart,
+            durationWeeks: FIXED_PLAN_WEEKS,
+            now: today,
+          });
           if (missed) {
             const stDoc = await SessionTemplate.findById(missed.sessionTemplateId)
               .select('title durationMinutes difficulty items')
@@ -566,6 +503,11 @@ router.get(
                 exerciseCount: Array.isArray(items) ? items.length : 0,
                 originalDate: missed.originalDate,
                 dayName: missed.dayName,
+                // additive
+                weekNumber: missed.weekNumber,
+                sessionOrder: missed.sessionOrder,
+                recommendedAt: missed.recommendedAt,
+                dueAt: missed.dueAt,
               };
               // missedSession = legacy field (kept for old clients)
               missedSession = missedData;
@@ -614,6 +556,9 @@ router.get(
           missedSession,
           rattrapageSession,
           displayKind,
+          // additive — relative-cycle scheduling metadata
+          minimumCompletedSessions: minimumCompletedSessionsForWeek,
+          isRestWeek,
           nutritionTargets,
           meals,
           log: log
@@ -995,32 +940,35 @@ function toLevelSlug(input: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-function getWeekRangeUtc(now: Date): { weekStart: Date; weekEnd: Date } {
-  const weekStartMs = utcMondayStartOfWeekContaining(now);
-  const weekStart = new Date(weekStartMs);
-  const weekEnd = new Date(weekStartMs + 7 * MS_PER_DAY - 1);
-  return { weekStart, weekEnd };
-}
-
 // GET /api/me/home/weekly-summary
+// Week window is anchored to the client's active PlanAssignment.startDate (or, absent an
+// assignment, the Subscription.startAt) — NOT a real calendar Monday. See scheduleDate.ts.
 router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
     const now = new Date();
-    const { weekStart, weekEnd } = getWeekRangeUtc(now);
 
     const userDoc = await User.findById(userId).select('level').lean();
     const userLevel = (userDoc as any)?.level as string | undefined;
     /** Matches admin "Contenu Home" keys (Intiate, Fighter, …). */
     const slugFromUserLevel = userLevel ? toLevelSlug(userLevel) : null;
 
+    const planAssignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
     const sub = await Subscription.findOne({
       userId,
       status: 'ACTIVE',
       endAt: { $gt: now },
     }).populate('levelTemplateId');
+
+    const anchorStart = planAssignment
+      ? new Date((planAssignment as any).startDate)
+      : sub
+        ? new Date((sub as any).startAt)
+        : now;
+    const weekNumber = getCurrentWeekNumber(anchorStart, 5, now);
+    const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
 
     let planned = 0;
     let levelName: string | null = null;
@@ -1032,37 +980,23 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
         levelName = level?.name ?? null;
         slugFromTemplateName = levelName ? toLevelSlug(levelName) : null;
 
-        const planAnchorMs = utcMondayStartOfWeekContaining(new Date((sub as any).startAt));
-        const nowUtcMs = utcStartOfCalendarDate(now);
-        const diffDays = Math.floor((nowUtcMs - planAnchorMs) / MS_PER_DAY);
-        const weekNumber = Math.min(5, Math.max(1, Math.floor(diffDays / 7) + 1));
-
         const levelDoc = await LevelTemplate.findById(level._id).lean();
         const targetWeek = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
-        if (targetWeek?.days) {
-          planned =
-            (targetWeek.days.mon?.length ?? 0) +
-            (targetWeek.days.tue?.length ?? 0) +
-            (targetWeek.days.wed?.length ?? 0) +
-            (targetWeek.days.thu?.length ?? 0) +
-            (targetWeek.days.fri?.length ?? 0) +
-            (targetWeek.days.sat?.length ?? 0) +
-            (targetWeek.days.sun?.length ?? 0);
-        }
+        planned = resolveWeekSessions(targetWeek).length;
       }
     }
 
     const completed = await WorkoutSession.countDocuments({
       userId,
       status: 'completed',
-      date: { $gte: weekStart, $lte: weekEnd },
+      date: { $gte: weekStart, $lt: weekEnd },
     });
 
     const nutritionAgg = await DailyNutritionLog.aggregate([
       {
         $match: {
           userId,
-          date: { $gte: weekStart, $lte: weekEnd },
+          date: { $gte: weekStart, $lt: weekEnd },
           status: 'complete',
         },
       },
@@ -1095,7 +1029,7 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
     res.json({
       weekRange: {
         startDate: dateToKeyUtc(weekStart),
-        endDate: dateToKeyUtc(new Date(weekEnd)),
+        endDate: dateToKeyUtc(new Date(weekEnd.getTime() - 1)),
       },
       weeklySessions: {
         completed,
@@ -1123,48 +1057,46 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/me/weekly-validation
+// Week window is anchored to the client's active PlanAssignment.startDate (or, absent an
+// assignment, `date`/now itself) — NOT a real calendar Monday. See scheduleDate.ts.
 router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
     const date = typeof req.query.date === 'string' ? req.query.date : undefined;
-
-    // Calculate dates
     const inputDate = date ? new Date(date) : new Date();
-    const dayOfWeek = inputDate.getDay();
-    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    const weekStartMs = new Date(inputDate).setDate(inputDate.getDate() + diffToMonday);
-    const weekStart = new Date(weekStartMs);
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStartMs + 7 * 24 * 60 * 60 * 1000 - 1);
+
+    const planAssignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
+    const anchorStart = planAssignment ? new Date((planAssignment as any).startDate) : inputDate;
+    const weekNumber = getCurrentWeekNumber(anchorStart, 5, inputDate);
+    const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
 
     const completedSessions = await WorkoutSession.find({
       userId,
       status: 'completed',
-      date: { $gte: weekStart, $lte: weekEnd },
+      date: { $gte: weekStart, $lt: weekEnd },
     }).select('date').lean();
 
-    const dateToKeyUtc = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
     const workoutDateKeys = new Set(
-      (completedSessions as Array<{ date: Date }>).map((doc) => dateToKeyUtc(new Date(doc.date)))
+      (completedSessions as Array<{ date: Date }>).map((doc) => utcDateKey(new Date(doc.date)))
     );
 
     const nutritionLogs = await DailyNutritionLog.find({
       userId,
-      date: { $gte: weekStart, $lte: weekEnd },
+      date: { $gte: weekStart, $lt: weekEnd },
       status: 'complete',
     }).select('date status').lean();
 
     const nutritionDateKeys = new Set(
-      (nutritionLogs as Array<{ date: Date }>).map((doc) => dateToKeyUtc(new Date(doc.date)))
+      (nutritionLogs as Array<{ date: Date }>).map((doc) => utcDateKey(new Date(doc.date)))
     );
 
-    const todayKey = dateToKeyUtc(new Date());
+    const todayKey = utcDateKey(new Date());
     const DAY_LABELS_FR = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'];
     const days = [];
     for (let i = 0; i < 7; i++) {
-      const dayDate = new Date(weekStart.getTime() + i * 24 * 60 * 60 * 1000);
-      const dateKey = dateToKeyUtc(dayDate);
+      const dayDate = new Date(weekStart.getTime() + i * MS_PER_DAY);
+      const dateKey = utcDateKey(dayDate);
       const workoutCompleted = workoutDateKeys.has(dateKey);
       const nutritionGoalCompleted = nutritionDateKeys.has(dateKey);
       days.push({
@@ -1184,8 +1116,8 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     if (!today.nutritionGoalCompleted) missing.push('nutrition');
 
     return res.json({
-      weekStart: dateToKeyUtc(weekStart),
-      weekEnd: dateToKeyUtc(new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000)),
+      weekStart: utcDateKey(weekStart),
+      weekEnd: utcDateKey(new Date(weekEnd.getTime() - MS_PER_DAY)),
       validatedDaysCount,
       totalDays: 7,
       today: {
@@ -1244,6 +1176,16 @@ router.get(
       const sessions = await SessionTemplate.find({ _id: { $in: Array.from(sessionIds) } }).select('title durationMinutes').lean();
       const sessionMap = new Map(sessions.map((s: any) => [s._id.toString(), s]));
 
+      // Additive: ordered-session metadata for this week (source of truth for scheduling).
+      const orderedSessions = resolveWeekSessions(week);
+      const orderMetaByTemplateId = new Map(
+        orderedSessions.map((s) => [String(s.sessionTemplateId), s])
+      );
+      const isRestWeekFlag = !!week?.isRestWeek;
+      const minimumCompletedSessionsForWeek = isRestWeekFlag
+        ? 0
+        : week?.minimumCompletedSessions ?? (level as any)?.minimumSessionsPerWeek ?? orderedSessions.length;
+
       const weekStartDate = new Date(planStartMs + (weekNumber - 1) * 7 * MS_PER_DAY);
       const weekEndDate = new Date(planStartMs + weekNumber * 7 * MS_PER_DAY - 1);
       const { sessionsByDateKey: completedSessionsByDateKey } =
@@ -1269,6 +1211,8 @@ router.get(
         title?: string;
         durationMinutes?: number;
         status: 'completed' | 'pending' | 'missed' | 'rest' | 'rattrapage';
+        sessionOrder?: number;
+        recommendedDayOffset?: number;
       };
 
       const days: Array<{
@@ -1337,7 +1281,14 @@ router.get(
           else if (isRattrapage) status = 'rattrapage';
           else if (isPast) status = 'missed';
           else status = 'pending'; // today or future
-          return { ...s, sessionTemplateId: id, status };
+          const orderMeta = orderMetaByTemplateId.get(id);
+          return {
+            ...s,
+            sessionTemplateId: id,
+            status,
+            sessionOrder: orderMeta?.sessionOrder,
+            recommendedDayOffset: orderMeta?.recommendedDayOffset ?? i,
+          };
         });
 
         let dayStatus: 'completed' | 'pending' | 'missed' | 'rest' | 'rattrapage';
@@ -1369,6 +1320,16 @@ router.get(
       const planStartDate = assignment.startDate;
       const planEndDate = assignment.endDate;
 
+      // Additive: overall week status (PASSED/CATCH_UP/etc), computed via the same
+      // centralized service the admin dashboard uses — see weeklyProgress.service.ts.
+      let weekStatus: string | null = null;
+      try {
+        const progress = await calculateTrainingWeekProgress(userId, (assignment as any)._id, weekNumber);
+        weekStatus = progress?.status ?? null;
+      } catch {
+        weekStatus = null;
+      }
+
       res.json({
         plan: {
           weekNumber,
@@ -1378,6 +1339,10 @@ router.get(
           planEndDate,
           durationWeeks,
           days,
+          // additive
+          minimumCompletedSessions: minimumCompletedSessionsForWeek,
+          isRestWeek: isRestWeekFlag,
+          weekStatus,
         },
       });
     } catch (e: unknown) {
@@ -1429,6 +1394,11 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
     let completedSessions = 0;
 
     const weeks = ((level as any)?.weeks || []).map((w: any, weekIdx: number) => {
+      const orderedSessionsForWeek = resolveWeekSessions(w);
+      const isRestWeekFlag = !!w?.isRestWeek;
+      const minimumCompletedSessions = isRestWeekFlag
+        ? 0
+        : w?.minimumCompletedSessions ?? (level as any)?.minimumSessionsPerWeek ?? orderedSessionsForWeek.length;
       const days = PLAN_DAY_KEYS.map((dayKey, dayIdx) => {
         const placements = w?.days?.[dayKey] || [];
         const first = placements[0];
@@ -1457,7 +1427,13 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
             : null,
         };
       });
-      return { weekIndex: weekIdx, days };
+      return {
+        weekIndex: weekIdx,
+        days,
+        // additive
+        minimumCompletedSessions,
+        isRestWeek: isRestWeekFlag,
+      };
     });
 
     const today = new Date();
@@ -1471,6 +1447,27 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
 
     const sub = await Subscription.findOne({ userId }).sort({ endAt: -1 }).lean();
     const subState = sub ? computeSubscriptionState({ status: (sub as any).status, endAt: (sub as any).endAt }) : null;
+
+    // Additive: was always an empty array previously ("not implemented" per prior comment);
+    // now backed by the same centralized catch-up detection /me/today uses.
+    let missedSeances: Array<{ weekIndex: number; dayIndex: number; originalDate: string; sessionTemplateId: string }> = [];
+    try {
+      const overdue = await findOverdueSessions({
+        userId,
+        levelDoc: level as any,
+        planStart,
+        durationWeeks: 5,
+        now: today,
+      });
+      missedSeances = overdue.map((o) => ({
+        weekIndex: o.weekNumber - 1,
+        dayIndex: o.recommendedDayOffset,
+        originalDate: o.originalDate,
+        sessionTemplateId: o.sessionTemplateId,
+      }));
+    } catch {
+      missedSeances = [];
+    }
 
     res.json({
       assignment: {
@@ -1502,7 +1499,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
         weekIndex: currentWeekIndex,
         dayIndex: currentDayIndex,
       },
-      missedSeances: [],
+      missedSeances,
       subscription: sub
         ? {
             expiresAt: utcDateKey(new Date((sub as any).endAt)),

@@ -4,6 +4,8 @@ export interface IWeeklySummary extends Document {
   userId: mongoose.Types.ObjectId;
   levelTemplateId: mongoose.Types.ObjectId;
   planAssignmentId?: mongoose.Types.ObjectId;
+  /** Relative-cycle week number (1-indexed), when this summary was computed by WeeklyProgressService. */
+  weekNumber?: number;
   weekStart: Date;
   weekEnd: Date;
   nutritionSuccessfulDays: number;
@@ -11,6 +13,8 @@ export interface IWeeklySummary extends Document {
   minimumSessions: number;
   maximumSessions: number;
   status: 'VALIDATED' | 'NOT_VALIDATED';
+  /** Granular training-only status from WeeklyProgressService (PASSED/PASSED_LATE/FAILED/REST_WEEK/...). */
+  trainingStatus?: 'UPCOMING' | 'IN_PROGRESS' | 'CATCH_UP' | 'PASSED' | 'PASSED_LATE' | 'FAILED' | 'REST_WEEK';
   failureReasons: string[];
   calculatedAt: Date;
   createdAt: Date;
@@ -35,6 +39,10 @@ const WeeklySummarySchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'PlanAssignment',
       index: true,
+    },
+    weekNumber: {
+      type: Number,
+      min: 1,
     },
     weekStart: {
       type: Date,
@@ -72,6 +80,10 @@ const WeeklySummarySchema: Schema = new Schema(
       enum: ['VALIDATED', 'NOT_VALIDATED'],
       required: true,
       index: true,
+    },
+    trainingStatus: {
+      type: String,
+      enum: ['UPCOMING', 'IN_PROGRESS', 'CATCH_UP', 'PASSED', 'PASSED_LATE', 'FAILED', 'REST_WEEK'],
     },
     failureReasons: {
       type: [String],
