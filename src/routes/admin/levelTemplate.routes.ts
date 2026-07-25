@@ -47,6 +47,7 @@ router.get(
       if (req.query.search) {
         filter.$or = [
           { name: { $regex: req.query.search, $options: 'i' } },
+          { clientDisplayName: { $regex: req.query.search, $options: 'i' } },
           { description: { $regex: req.query.search, $options: 'i' } },
         ];
       }
@@ -88,7 +89,8 @@ router.get(
 router.post(
   '/',
   [
-    body('name').notEmpty().trim().withMessage('Name is required'),
+    body('name').notEmpty().trim().isLength({ min: 2, max: 100 }).withMessage('Le nom interne du plan doit contenir entre 2 et 100 caractères.'),
+    body('clientDisplayName').notEmpty().trim().isLength({ min: 2, max: 120 }).withMessage('Veuillez saisir le nom affiché au client.'),
     body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
     body('description').optional().isString(),
     body('imageUrl').optional().isString(),
@@ -105,7 +107,7 @@ router.post(
       }
 
       const gender = req.body.gender ?? 'M';
-      const existing = await LevelTemplate.findOne({ name: req.body.name, gender });
+      const existing = await LevelTemplate.findOne({ name: req.body.name.trim(), gender });
       if (existing) {
         return res.status(409).json({ message: `Un template "${req.body.name}" (${gender}) existe déjà.` });
       }
@@ -117,7 +119,8 @@ router.post(
       }));
 
       const plan = await LevelTemplate.create({
-        name: req.body.name,
+        name: req.body.name.trim(),
+        clientDisplayName: req.body.clientDisplayName ? req.body.clientDisplayName.trim() : req.body.name.trim(),
         level: req.body.level || 'INITIATE',
         description: req.body.description,
         imageUrl: req.body.imageUrl,
@@ -141,6 +144,8 @@ router.put(
   '/:id',
   [
     param('id').isMongoId(),
+    body('name').optional().trim().isLength({ min: 2, max: 100 }).withMessage('Le nom interne du plan doit contenir entre 2 et 100 caractères.'),
+    body('clientDisplayName').optional().trim().isLength({ min: 2, max: 120 }).withMessage('Le nom affiché au client doit contenir entre 2 et 120 caractères.'),
     body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
     body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
     body('minimumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('minimumSessionsPerWeek must be 1-7'),
@@ -157,7 +162,8 @@ router.put(
       if (!plan) {
         return res.status(404).json({ message: 'Level template not found' });
       }
-      if (req.body.name != null) plan.name = req.body.name;
+      if (req.body.name != null && req.body.name.trim() !== '') plan.name = req.body.name.trim();
+      if (req.body.clientDisplayName != null && req.body.clientDisplayName.trim() !== '') plan.clientDisplayName = req.body.clientDisplayName.trim();
       if (req.body.level !== undefined) plan.level = req.body.level;
       if (req.body.description != null) plan.description = req.body.description;
       if (req.body.imageUrl !== undefined) plan.imageUrl = req.body.imageUrl;

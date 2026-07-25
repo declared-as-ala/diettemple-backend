@@ -309,23 +309,25 @@ router.get('/subscription', async (req: AuthRequest, res: Response) => {
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
     let sub = await Subscription.findOne({ userId, status: 'ACTIVE', endAt: { $gt: new Date() } })
-      .populate('levelTemplateId', 'name')
+      .populate('levelTemplateId', 'name clientDisplayName')
       .lean();
     if (!sub) {
-      sub = await Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId', 'name').lean();
+      sub = await Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId', 'name clientDisplayName').lean();
     }
     if (!sub) return res.json({ subscription: null });
 
     const s = sub as any;
     const { status, daysRemaining: days } = computeSubscriptionState({ status: s.status, endAt: s.endAt });
     const lastAction = getLastActionFromHistory(s.history);
+    const visibleLevelName = s.levelTemplateId?.clientDisplayName || s.levelTemplateId?.name || null;
     res.json({
       subscription: {
         status,
         startAt: s.startAt,
         endAt: s.endAt,
         daysRemaining: days,
-        levelName: s.levelTemplateId?.name ?? null,
+        levelName: visibleLevelName,
+        clientDisplayName: visibleLevelName,
         lastAction: lastAction?.action ?? null,
         lastActionAt: lastAction?.date ?? null,
       },
@@ -370,12 +372,15 @@ router.get(
       if (sub) {
         const { status: subStatus, daysRemaining: days } = computeSubscriptionState({ status: sub.status, endAt: sub.endAt });
         const lastAction = getLastActionFromHistory((sub as any).history);
+        const subLevel = sub.levelTemplateId as any;
+        const visibleSubLevelName = subLevel?.clientDisplayName || subLevel?.name || null;
         subscription = {
           status: subStatus,
           startAt: sub.startAt,
           endAt: sub.endAt,
           daysRemaining: days,
-          levelName: (sub.levelTemplateId as any)?.name ?? null,
+          levelName: visibleSubLevelName,
+          clientDisplayName: visibleSubLevelName,
           lastAction: lastAction?.action ?? null,
           lastActionAt: lastAction?.date ?? null,
         };
@@ -1359,7 +1364,8 @@ router.get(
         });
       }
 
-      const levelName = (await LevelTemplate.findById((assignment as any).levelTemplateId).select('name').lean() as any)?.name;
+      const levelDoc = (await LevelTemplate.findById((assignment as any).levelTemplateId).select('name clientDisplayName').lean() as any);
+      const levelName = levelDoc?.clientDisplayName || levelDoc?.name || null;
       const planStartDate = assignment.startDate;
       const planEndDate = assignment.endDate;
 
@@ -1367,6 +1373,7 @@ router.get(
         plan: {
           weekNumber,
           levelName,
+          clientDisplayName: levelName,
           planStartDate,
           planEndDate,
           durationWeeks,
@@ -1476,7 +1483,8 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
       plan: level
         ? {
             id: String((level as any)._id),
-            name: (level as any).name,
+            name: (level as any).clientDisplayName || (level as any).name,
+            clientDisplayName: (level as any).clientDisplayName || (level as any).name,
             gender: (level as any).gender,
             durationWeeks: 5,
             weeks,

@@ -62,6 +62,7 @@ export interface IWeekTemplate {
 
 export interface ILevelTemplate extends Document {
   name: string;
+  clientDisplayName?: string;
   description?: string;
   imageUrl?: string;
   isActive: boolean;
@@ -93,6 +94,7 @@ const defaultWeeks = (): IWeekTemplate[] =>
 const LevelTemplateSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, index: true },
+    clientDisplayName: { type: String, trim: true, index: true },
     gender: { type: String, enum: ['M', 'F'], default: 'M' },
     level: {
       type: String,

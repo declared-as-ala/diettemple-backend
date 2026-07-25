@@ -63,7 +63,7 @@ router.get(
 
       const [users, subscriptions, lastWorkoutByUser] = await Promise.all([
         User.find(userFilter).select('name email phone createdAt photoUri').sort({ name: 1 }).lean(),
-        Subscription.find({}).populate('levelTemplateId', 'name').lean(),
+        Subscription.find({}).populate('levelTemplateId', 'name clientDisplayName').lean(),
         WorkoutSession.aggregate([
           { $match: { status: 'completed' } },
           { $sort: { date: -1 } },
@@ -922,7 +922,7 @@ router.get(
       const userId = req.params.id;
       const [user, sub, nutritionAssignment, lastNote, lastWorkout] = await Promise.all([
         User.findById(userId).select('-passwordHash -otp -otpExpires').lean(),
-        Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId', 'name').lean(),
+        Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId', 'name clientDisplayName').lean(),
         UserNutritionPlan.findOne({ userId }).sort({ createdAt: -1 }).populate('nutritionPlanTemplateId', 'name dailyCalories').lean(),
         CoachNote.findOne({ userId }).sort({ date: -1 }).lean(),
         WorkoutSession.findOne({ userId, status: 'completed' }).sort({ date: -1 }).select('date').lean(),

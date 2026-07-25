@@ -13,8 +13,8 @@ const LOCAL_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/diettemp
 
 async function migrateData() {
   try {
-    console.log('🔗 Connecting to Atlas...');
-    const atlasConn = await mongoose.createConnection(ATLAS_URI).asPromise();
+    console.log('🔗 Connecting to Atlas (diettemple database)...');
+    const atlasConn = await mongoose.createConnection(ATLAS_URI + '/diettemple').asPromise();
 
     console.log('🔗 Connecting to Local DB...');
     const localConn = await mongoose.createConnection(LOCAL_URI).asPromise();
