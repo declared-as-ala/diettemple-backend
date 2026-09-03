@@ -27,10 +27,9 @@ export const authenticate = async (
     
     const JWT_SECRET = process.env.JWT_SECRET;
 
-    let decoded: { userId: string };
+    let decoded: { userId: string; tokenVersion?: number };
     try {
-      decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-      console.log(`[Auth Middleware] Token decoded successfully, userId: ${decoded.userId}`);
+      decoded = jwt.verify(token, JWT_SECRET) as { userId: string; tokenVersion?: number };
     } catch (jwtError: any) {
       console.error(`[Auth Middleware] JWT verification failed:`, jwtError.message);
       if (jwtError.name === 'TokenExpiredError') {
@@ -42,10 +41,9 @@ export const authenticate = async (
       }
     }
 
-    const user = await User.findById(decoded.userId).select('-passwordHash');
+    const user = await User.findById(decoded.userId).select('+tokenVersion -passwordHash');
 
     if (!user) {
-      console.error(`[Auth Middleware] User not found: ${decoded.userId}`);
       return res.status(401).json({ message: 'User not found' });
     }
 
@@ -53,7 +51,9 @@ export const authenticate = async (
       return res.status(403).json({ message: 'Account disabled' });
     }
 
-    console.log(`[Auth Middleware] User authenticated: ${user.email || user.phone}`);
+    if ((decoded.tokenVersion || 0) !== (user.tokenVersion || 0)) {
+      return res.status(401).json({ message: 'Session revoked' });
+    }
     req.user = user;
     next();
   } catch (error: any) {

@@ -5,7 +5,19 @@ export interface IUser extends Document {
   phone?: string;
   passwordHash: string;
   name?: string;
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: Date;
+  address?: {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    postalCode?: string;
+    country?: string;
+    region?: string;
+  };
   photoUri?: string;
+  tokenVersion: number;
   age?: string;
   sexe?: 'M' | 'F';
   poids?: string;
@@ -65,6 +77,17 @@ const UserSchema: Schema = new Schema(
       type: String,
       trim: true,
     },
+    firstName: { type: String, trim: true },
+    lastName: { type: String, trim: true },
+    dateOfBirth: { type: Date },
+    address: {
+      line1: { type: String, trim: true },
+      line2: { type: String, trim: true },
+      city: { type: String, trim: true },
+      postalCode: { type: String, trim: true },
+      country: { type: String, trim: true },
+      region: { type: String, trim: true },
+    },
     photoUri: {
       type: String,
     },
@@ -100,6 +123,7 @@ const UserSchema: Schema = new Schema(
       default: true,
       index: true,
     },
+    tokenVersion: { type: Number, default: 0, select: false },
     biometricEnabled: {
       type: Boolean,
       default: false,

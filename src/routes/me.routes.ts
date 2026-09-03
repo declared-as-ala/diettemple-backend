@@ -275,7 +275,7 @@ router.get(
       let isRestWeek = false;
 
       // ── 1. Load plan sources — PlanAssignment (preferred) or Subscription (legacy) ──
-      // PlanAssignment is the authoritative source for the 5-week workout plan.
+      // PlanAssignment is the authoritative source for the workout plan.
       // Subscription controls payment access and is kept separate.
       const planAssignment = await resolveWorkoutAssignment(userId);
 
@@ -306,7 +306,7 @@ router.get(
       }
 
       // ── 2. LevelTemplate is authoritative for workout — PlanAssignment only ──
-      const FIXED_PLAN_WEEKS = 5;
+      const assignmentDurationWeeks = planAssignment ? Number(planAssignment.durationWeeks) : 0;
       const effectiveLevelId = planAssignment ? (planAssignment as any).levelTemplateId : null;
       const effectivePlanStart = planAssignment ? normalizePlanStartDate(new Date(planAssignment.startDate)) : null;
 
@@ -317,7 +317,7 @@ router.get(
 
         if (hasLevelTemplatePlan) {
           const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, effectivePlanStart);
-          if (diffDays >= 0 && weekIndex < FIXED_PLAN_WEEKS) {
+          if (diffDays >= 0 && weekIndex < assignmentDurationWeeks) {
             weekNumber = weekIndex + 1;
             const templateDayKey = PLAN_DAY_KEYS[dayIndex];
             const week = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
@@ -439,14 +439,14 @@ router.get(
 
       const log = await DailyNutritionLog.findOne({ userId, date: today }).lean();
 
-      // Plan is strictly assignment-based and fixed to 5 weeks.
+      // Plan dates and duration are immutable assignment snapshots.
       const resolvedPlanEnd = planAssignment ? new Date(planAssignment.endDate) : null;
 
       const plan = effectivePlanStart && resolvedPlanEnd
         ? {
             planStartDate: effectivePlanStart,
             planEndDate: resolvedPlanEnd,
-            durationWeeks: FIXED_PLAN_WEEKS,
+            durationWeeks: assignmentDurationWeeks,
             planAssignmentId: planAssignment ? String((planAssignment as any)._id) : null,
           }
         : null;
@@ -500,7 +500,7 @@ router.get(
             userId,
             levelDoc: levelDoc as any,
             planStart: effectivePlanStart,
-            durationWeeks: FIXED_PLAN_WEEKS,
+            durationWeeks: assignmentDurationWeeks,
             now: today,
           });
           if (missed) {
@@ -981,7 +981,7 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
       : sub
         ? new Date((sub as any).startAt)
         : now;
-    const weekNumber = getCurrentWeekNumber(anchorStart, 5, now);
+    const weekNumber = getCurrentWeekNumber(anchorStart, planAssignment?.durationWeeks || 1, now);
     const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
 
     let planned = 0;
@@ -1082,7 +1082,7 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
 
     const planAssignment = await resolveWorkoutAssignment(userId, inputDate);
     const anchorStart = planAssignment ? new Date((planAssignment as any).startDate) : inputDate;
-    const weekNumber = getCurrentWeekNumber(anchorStart, 5, inputDate);
+    const weekNumber = getCurrentWeekNumber(anchorStart, planAssignment?.durationWeeks || 1, inputDate);
     const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
 
     const completedSessions = await WorkoutSession.find({
@@ -1163,11 +1163,11 @@ router.get(
         return res.json({ plan: null, message: 'No active workout assignment found' });
       }
 
+      const durationWeeks = Number((assignment as any).durationWeeks);
       const rawWeekNumber = parseInt(req.query.weekNumber as string, 10);
-      const weekNumber = Number.isNaN(rawWeekNumber) ? 1 : Math.min(5, Math.max(1, rawWeekNumber));
+      const weekNumber = Number.isNaN(rawWeekNumber) ? 1 : Math.min(durationWeeks, Math.max(1, rawWeekNumber));
       const planStart = normalizePlanStartDate(new Date((assignment as any).startDate));
       const planStartMs = utcStartOfCalendarDate(planStart);
-      const durationWeeks = 5; // always fixed at 5 weeks
 
       // Level resolution priority: ClientPlanOverride -> assignment level template.
       const planOverride = await ClientPlanOverride.findOne({ userId, status: 'active' }).lean();
@@ -1378,6 +1378,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
 
     const planStart = normalizePlanStartDate(new Date((assignment as any).startDate));
     const planEnd = new Date((assignment as any).endDate);
+    const durationWeeks = Number((assignment as any).durationWeeks);
     const level = await LevelTemplate.findById((assignment as any).levelTemplateId).lean();
 
     const sessionIds = new Set<string>();
@@ -1407,7 +1408,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
     let totalScheduledSessions = 0;
     let completedSessions = 0;
 
-    const weeks = ((level as any)?.weeks || []).map((w: any, weekIdx: number) => {
+    const weeks = ((level as any)?.weeks || []).slice(0, durationWeeks).map((w: any, weekIdx: number) => {
       const orderedSessionsForWeek = resolveWeekSessions(w);
       const isRestWeekFlag = !!w?.isRestWeek;
       const minimumCompletedSessions = isRestWeekFlag
@@ -1452,7 +1453,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
 
     const today = new Date();
     const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, planStart);
-    const currentWeekIndex = Math.min(4, Math.max(0, weekIndex));
+    const currentWeekIndex = Math.min(durationWeeks - 1, Math.max(0, weekIndex));
     const currentDayIndex = Math.min(6, Math.max(0, dayIndex));
     const completionPercent = totalScheduledSessions > 0
       ? Math.round((completedSessions / totalScheduledSessions) * 100)
@@ -1470,7 +1471,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
         userId,
         levelDoc: level as any,
         planStart,
-        durationWeeks: 5,
+        durationWeeks,
         now: today,
       });
       missedSeances = overdue.map((o) => ({
@@ -1488,7 +1489,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
         id: String((assignment as any)._id),
         startDate: utcDateKey(planStart),
         endDate: utcDateKey(planEnd),
-        durationWeeks: 5,
+        durationWeeks,
         status: (assignment as any).status,
       },
       plan: level
@@ -1497,7 +1498,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
             name: (level as any).clientDisplayName || (level as any).name,
             clientDisplayName: (level as any).clientDisplayName || (level as any).name,
             gender: (level as any).gender,
-            durationWeeks: 5,
+            durationWeeks,
             weeks,
           }
         : null,

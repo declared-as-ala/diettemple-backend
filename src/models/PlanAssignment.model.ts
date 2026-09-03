@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
-export type PlanAssignmentStatus = 'active' | 'completed' | 'paused' | 'archived';
+export type PlanAssignmentStatus = 'scheduled' | 'active' | 'completed' | 'cancelled' | 'replaced' | 'paused' | 'archived';
 export type CompletionType = 'normal' | 'rattrapage';
 
 export interface IPlanAssignment extends Document {
@@ -21,6 +21,9 @@ export interface IPlanAssignment extends Document {
   startDate: Date;
   endDate: Date;
   durationWeeks: number;
+  durationWeeksSnapshot?: number;
+  durationDaysSnapshot?: number;
+  legacyAccessPreserved?: boolean;
   assignedBy?: mongoose.Types.ObjectId;
   assignedAt: Date;
   note?: string;
@@ -30,9 +33,8 @@ export interface IPlanAssignment extends Document {
   updatedAt: Date;
 }
 
-const MS_PER_DAY = 24 * 60 * 60 * 1_000;
-export const PLAN_DURATION_DAYS = 35;
-export const PLAN_DURATION_WEEKS = 5;
+export const PLAN_DURATION_DAYS = 35; // Legacy export only; never use for new assignments.
+export const PLAN_DURATION_WEEKS = 5; // Legacy export only; never use for new assignments.
 
 const PlanAssignmentSchema: Schema = new Schema(
   {
@@ -69,13 +71,16 @@ const PlanAssignmentSchema: Schema = new Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'completed', 'paused', 'archived'],
+      enum: ['scheduled', 'active', 'completed', 'cancelled', 'replaced', 'paused', 'archived'],
       default: 'active',
       index: true,
     },
     startDate: { type: Date, required: true },
     endDate: { type: Date },
-    durationWeeks: { type: Number, default: 5 },
+    durationWeeks: { type: Number, required: true, min: 1 },
+    durationWeeksSnapshot: { type: Number, min: 1 },
+    durationDaysSnapshot: { type: Number, min: 7 },
+    legacyAccessPreserved: { type: Boolean, default: false },
     assignedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     assignedAt: { type: Date, default: Date.now },
     note: { type: String },
@@ -85,21 +90,28 @@ const PlanAssignmentSchema: Schema = new Schema(
   { timestamps: true }
 );
 
-PlanAssignmentSchema.pre('save', async function (next) {
+PlanAssignmentSchema.pre('validate', async function (next) {
   try {
     if (this.isModified('startDate') || this.isNew) {
-      const start = new Date(this.startDate as unknown as string);
-      start.setHours(0, 0, 0, 0);
+      const { addBusinessDays, parseBusinessDate } = await import('../utils/businessDate');
+      const start = parseBusinessDate(new Date(this.startDate as unknown as string));
       this.startDate = start as any;
-      
-      const LevelTemplate = mongoose.model('LevelTemplate');
-      const template = await LevelTemplate.findById(this.levelTemplateId).lean();
-      const durationWeeks = template && typeof (template as any).durationWeeks === 'number'
-        ? (template as any).durationWeeks
-        : 5;
-        
+
+      let durationWeeks = Number(this.durationWeeksSnapshot || this.durationWeeks);
+      if (!Number.isInteger(durationWeeks) || durationWeeks < 1) {
+        const LevelTemplate = mongoose.model('LevelTemplate');
+        const template = await LevelTemplate.findById(this.levelTemplateId).lean();
+        const weeks = Array.isArray((template as any)?.weeks) ? (template as any).weeks.length : 0;
+        durationWeeks = weeks || Number((template as any)?.durationWeeks);
+      }
+      if (!Number.isInteger(durationWeeks) || durationWeeks < 1) {
+        throw new Error('Plan template has no valid duration');
+      }
+
       this.durationWeeks = durationWeeks;
-      this.endDate = new Date(start.getTime() + (durationWeeks * 7) * MS_PER_DAY);
+      this.durationWeeksSnapshot = durationWeeks;
+      this.durationDaysSnapshot = durationWeeks * 7;
+      this.endDate = addBusinessDays(start, durationWeeks * 7);
     }
     next();
   } catch (err: any) {

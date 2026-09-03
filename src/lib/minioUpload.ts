@@ -32,6 +32,17 @@ export const imageUpload = multer({
   },
 });
 
+/** Client avatars: jpg, png or webp only, max 5 MB. */
+export const avatarUpload = multer({
+  dest: TEMP_DIR,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Invalid avatar. Accepted formats: jpg, png, webp'));
+  },
+});
+
 /** Any file type — use for mixed endpoints */
 export const anyUpload = multer({
   dest: TEMP_DIR,

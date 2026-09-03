@@ -40,13 +40,13 @@ const getJWTSecret = (): string => {
 
 const JWT_EXPIRES_IN: string = process.env.JWT_EXPIRES_IN || '7d';
 
-export const generateToken = (userId: string): string => {
+export const generateToken = (userId: string, tokenVersion = 0): string => {
   // Get JWT_SECRET at runtime (after dotenv.config() has run)
   const JWT_SECRET = getJWTSecret();
   
   // Use process.env.JWT_SECRET directly - NO fallback, NO hardcoded values
   const token = jwt.sign(
-    { userId },
+    { userId, tokenVersion },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
   );
@@ -67,6 +67,7 @@ const sanitizeUser = (user: IUser): IUser => {
   delete (u as any).passwordHash;
   delete (u as any).otp;
   delete (u as any).otpExpires;
+  delete (u as any).tokenVersion;
   return u;
 };
 
@@ -83,7 +84,7 @@ export const authService = {
       ? { email: data.emailOrPhone.toLowerCase() }
       : { phone: data.emailOrPhone.replace(/\s/g, '') };
 
-    const user = await User.findOne(query);
+    const user = await User.findOne(query).select('+tokenVersion');
 
     if (!user) {
       throw new Error('Invalid credentials');
@@ -99,7 +100,7 @@ export const authService = {
       throw new Error('Invalid credentials');
     }
 
-    const token = generateToken(user._id.toString());
+    const token = generateToken(user._id.toString(), user.tokenVersion || 0);
 
     return {
       user: sanitizeUser(user),
@@ -227,11 +228,9 @@ export const authService = {
       ? { email: emailOrPhone.toLowerCase() }
       : { phone: emailOrPhone.replace(/\s/g, '') };
 
-    console.log(`[Biometric Login] Query:`, query);
-    const user = await User.findOne(query);
+    const user = await User.findOne(query).select('+tokenVersion');
 
     if (!user) {
-      console.error(`[Biometric Login] User not found: ${emailOrPhone}`);
       throw new Error('User not found');
     }
 
@@ -239,16 +238,13 @@ export const authService = {
       throw new Error('Account disabled. Please contact support.');
     }
     
-    console.log(`[Biometric Login] User found: ${user.email || user.phone}, biometricEnabled: ${user.biometricEnabled}`);
-
     // Check if user has biometric enabled
     if (!user.biometricEnabled) {
-      console.error(`Biometric login failed: User ${emailOrPhone} does not have biometric enabled`);
       throw new Error('Biometric authentication not enabled for this user. Please enable it from settings.');
     }
 
     // Generate new JWT token
-    const token = generateToken(user._id.toString());
+    const token = generateToken(user._id.toString(), user.tokenVersion || 0);
 
     return {
       user: sanitizeUser(user),

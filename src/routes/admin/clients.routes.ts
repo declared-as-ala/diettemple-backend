@@ -20,6 +20,12 @@ import ExerciseHistory from '../../models/ExerciseHistory.model';
 import Exercise from '../../models/Exercise.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { emitUserUpdated } from '../../realtime/userRealtime';
+import PlanAssignment from '../../models/PlanAssignment.model';
+import { assertAssignablePlan, createPlanAssignment, reconcileUserAssignments } from '../../services/planAssignmentLifecycle.service';
+import { todayInBusinessTimeZone } from '../../utils/businessDate';
+import { avatarUpload, buildFilename, deleteFromMinio, uploadToMinio } from '../../lib/minioUpload';
+import { BUCKETS } from '../../lib/minioClient';
+import { requireAdmin } from '../../middleware/admin.middleware';
 
 const router = Router();
 const now = new Date();
@@ -159,6 +165,7 @@ router.post(
       if (assignedPlanId) {
         const plan = await LevelTemplate.findById(assignedPlanId);
         if (!plan) return res.status(400).json({ message: 'Plan not found' });
+        try { assertAssignablePlan(plan.toObject()); } catch (error: unknown) { return res.status(400).json({ message: (error as Error).message }); }
       }
 
       const bcrypt = await import('bcrypt');
@@ -185,6 +192,9 @@ router.post(
       });
       const doc = user.toObject();
       delete (doc as any).passwordHash;
+      if (assignedPlanId) {
+        await createPlanAssignment({ userId: user._id, planTemplateId: assignedPlanId, startDate: todayInBusinessTimeZone(), action: 'assign', adminId: req.user?._id, note: 'Assigned during client creation' });
+      }
       if (req.user?._id) {
         await AuditLog.create({
           actorAdminId: req.user._id,
@@ -774,11 +784,64 @@ router.post(
 );
 
 // PUT /:id — update client profile
+router.post('/:id/photo', requireAdmin, [param('id').isMongoId()], avatarUpload.single('photo'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Photo is required' });
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Client introuvable' });
+    const previousPhoto = user.photoUri;
+    const fileName = buildFilename(req.file.originalname, 'avatar', ['.jpg', '.jpeg', '.png', '.webp']);
+    const photoUri = await uploadToMinio(req.file, BUCKETS.MEDIA, `clients/${user._id}/${fileName}`);
+    user.photoUri = photoUri;
+    await user.save();
+    await deleteFromMinio(previousPhoto);
+    if (req.user?._id) await AuditLog.create({ actorAdminId: req.user._id, targetUserId: user._id, actionType: 'profile_photo_changed', metadata: { operation: 'replace' } });
+    await emitUserUpdated(String(user._id));
+    return res.json({ photoUri });
+  } catch (error: unknown) { return res.status(500).json({ message: (error as Error).message }); }
+});
+
+router.delete('/:id/photo', requireAdmin, [param('id').isMongoId()], async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'Client introuvable' });
+    const previousPhoto = user.photoUri;
+    user.photoUri = undefined;
+    await user.save();
+    await deleteFromMinio(previousPhoto);
+    if (req.user?._id) await AuditLog.create({ actorAdminId: req.user._id, targetUserId: user._id, actionType: 'profile_photo_changed', metadata: { operation: 'delete' } });
+    await emitUserUpdated(String(user._id));
+    return res.json({ photoUri: null });
+  } catch (error: unknown) { return res.status(500).json({ message: (error as Error).message }); }
+});
+
+router.post('/:id/reset-password', requireAdmin, [param('id').isMongoId(), body('newPassword').isLength({ min: 8 })], async (req: AuthRequest, res: Response) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 8 caractères' });
+    const bcrypt = await import('bcrypt');
+    const user = await User.findById(req.params.id).select('+tokenVersion');
+    if (!user) return res.status(404).json({ message: 'Client introuvable' });
+    user.passwordHash = await bcrypt.default.hash(req.body.newPassword, 12);
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    user.biometricEnabled = false;
+    user.biometricType = null;
+    await user.save();
+    await AuditLog.create({ actorAdminId: req.user!._id, targetUserId: user._id, actionType: 'password_reset', metadata: { sessionsRevoked: true } });
+    return res.json({ message: 'Mot de passe réinitialisé. Toutes les sessions ont été révoquées.' });
+  } catch (error: unknown) { return res.status(500).json({ message: (error as Error).message }); }
+});
+
 router.put(
   '/:id',
+  requireAdmin,
   [
     param('id').isMongoId(),
     body('name').optional().trim(),
+    body('firstName').optional().trim(),
+    body('lastName').optional().trim(),
+    body('dateOfBirth').optional({ nullable: true }).isISO8601(),
+    body('address').optional().isObject(),
     body('email').optional().isEmail(),
     body('phone').optional().isString(),
     body('sexe').optional().isIn(['M', 'F']),
@@ -804,8 +867,21 @@ router.put(
       }
 
       if (req.body.name !== undefined) user.name = req.body.name;
-      if (req.body.email !== undefined) user.email = req.body.email.toLowerCase();
-      if (req.body.phone !== undefined) user.phone = req.body.phone.trim();
+      if (req.body.firstName !== undefined) user.firstName = req.body.firstName;
+      if (req.body.lastName !== undefined) user.lastName = req.body.lastName;
+      if (req.body.dateOfBirth !== undefined) user.dateOfBirth = req.body.dateOfBirth ? new Date(req.body.dateOfBirth) : undefined;
+      if (req.body.address !== undefined) user.address = req.body.address;
+      if (req.body.email !== undefined) user.email = req.body.email ? req.body.email.toLowerCase() : undefined;
+      if (req.body.phone !== undefined) user.phone = req.body.phone ? req.body.phone.trim() : undefined;
+      if (!user.email && !user.phone) return res.status(400).json({ message: 'Un email ou un téléphone est requis' });
+      const identityQueries: Array<{ email: string } | { phone: string }> = [];
+      if (user.email) identityQueries.push({ email: user.email });
+      if (user.phone) identityQueries.push({ phone: user.phone });
+      const duplicate = await User.findOne({
+        _id: { $ne: user._id },
+        $or: identityQueries,
+      });
+      if (duplicate) return res.status(409).json({ message: 'Email ou téléphone déjà utilisé' });
       if (req.body.sexe !== undefined) user.sexe = req.body.sexe;
       if (req.body.age !== undefined) user.age = req.body.age;
       if (req.body.taille !== undefined) user.taille = req.body.taille;
@@ -920,12 +996,16 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
-      const [user, sub, nutritionAssignment, lastNote, lastWorkout] = await Promise.all([
+      await reconcileUserAssignments(userId);
+      const [user, sub, nutritionAssignment, lastNote, lastWorkout, currentAssignment, scheduledAssignment, assignmentHistory] = await Promise.all([
         User.findById(userId).select('-passwordHash -otp -otpExpires').lean(),
         Subscription.findOne({ userId }).sort({ endAt: -1 }).populate('levelTemplateId', 'name clientDisplayName').lean(),
         UserNutritionPlan.findOne({ userId }).sort({ createdAt: -1 }).populate('nutritionPlanTemplateId', 'name dailyCalories').lean(),
         CoachNote.findOne({ userId }).sort({ date: -1 }).lean(),
         WorkoutSession.findOne({ userId, status: 'completed' }).sort({ date: -1 }).select('date').lean(),
+        PlanAssignment.findOne({ userId, status: 'active' }).populate('levelTemplateId', 'name clientDisplayName weeks durationWeeks').lean(),
+        PlanAssignment.findOne({ userId, status: 'scheduled' }).sort({ startDate: 1 }).populate('levelTemplateId', 'name clientDisplayName weeks durationWeeks').lean(),
+        PlanAssignment.find({ userId }).sort({ startDate: -1 }).limit(20).populate('levelTemplateId', 'name clientDisplayName').lean(),
       ]);
       if (!user) return res.status(404).json({ message: 'User not found' });
       const ordersSummaryAgg = await Order.aggregate([
@@ -979,6 +1059,9 @@ router.get(
       res.json({
         client: user,
         subscription: sub ? { ...sub, effectiveStatus: eff } : null,
+        currentAssignment: currentAssignment || null,
+        scheduledAssignment: scheduledAssignment || null,
+        assignmentHistory,
         nutritionAssignment: nutritionAssignment || null,
         lastCoachNote: lastNote || null,
         lastWorkoutDate: (lastWorkout as any)?.date || null,

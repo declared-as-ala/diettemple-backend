@@ -1,6 +1,9 @@
 import type { Types } from 'mongoose';
 import PlanAssignment from '../models/PlanAssignment.model';
 import Subscription from '../models/Subscription.model';
+import LevelTemplate from '../models/LevelTemplate.model';
+import { diffBusinessDays } from '../utils/businessDate';
+import { reconcileUserAssignments } from './planAssignmentLifecycle.service';
 
 export type WorkoutAssignmentSource = 'plan-assignment' | 'subscription-fallback';
 
@@ -27,7 +30,8 @@ export async function resolveWorkoutAssignment(
   userId: unknown,
   at: Date = new Date()
 ): Promise<ResolvedWorkoutAssignment | null> {
-  const assignment = await PlanAssignment.findOne({ userId, status: 'active' })
+  await reconcileUserAssignments(userId, at);
+  const assignment = await PlanAssignment.findOne({ userId, status: 'active', startDate: { $lte: at }, endDate: { $gt: at } })
     .sort({ assignedAt: -1, createdAt: -1, _id: -1 })
     .lean();
 
@@ -36,7 +40,7 @@ export async function resolveWorkoutAssignment(
       ...(assignment as any),
       startDate: new Date((assignment as any).startDate),
       endDate: new Date((assignment as any).endDate),
-      durationWeeks: Number((assignment as any).durationWeeks) || 5,
+      durationWeeks: Number((assignment as any).durationWeeksSnapshot || (assignment as any).durationWeeks),
       source: 'plan-assignment',
     };
   }
@@ -51,7 +55,10 @@ export async function resolveWorkoutAssignment(
 
   if (!subscription) return null;
 
-  return assignmentFromSubscription(subscription as any);
+  const plan = await LevelTemplate.findById((subscription as any).levelTemplateId).select('weeks durationWeeks').lean();
+  return assignmentFromSubscription(subscription as any, Array.isArray((plan as any)?.weeks) && (plan as any).weeks.length
+    ? (plan as any).weeks.length
+    : Math.ceil(diffBusinessDays(new Date((subscription as any).endAt), new Date((subscription as any).startAt)) / 7));
 }
 
 export function assignmentFromSubscription(subscription: {
@@ -61,7 +68,8 @@ export function assignmentFromSubscription(subscription: {
   startAt: Date | string;
   endAt: Date | string;
   createdAt?: Date;
-}): ResolvedWorkoutAssignment {
+}, durationWeeks = Math.ceil(diffBusinessDays(new Date(subscription.endAt), new Date(subscription.startAt)) / 7)): ResolvedWorkoutAssignment {
+  if (!Number.isInteger(durationWeeks) || durationWeeks < 1) throw new Error('Legacy assignment has no valid duration');
   return {
     _id: subscription._id,
     userId: subscription.userId,
@@ -70,7 +78,7 @@ export function assignmentFromSubscription(subscription: {
     status: 'active',
     startDate: new Date(subscription.startAt),
     endDate: new Date(subscription.endAt),
-    durationWeeks: 5,
+    durationWeeks,
     assignedAt: subscription.createdAt,
     source: 'subscription-fallback',
   };

@@ -11,7 +11,15 @@ export type AuditActionType =
   | 'note_added'
   | 'diet_update'
   | 'check_in_scheduled'
-  | 'client_created';
+  | 'client_created'
+  | 'client_update'
+  | 'profile_photo_changed'
+  | 'password_reset'
+  | 'plan_assigned'
+  | 'plan_renewed'
+  | 'plan_replaced'
+  | 'plan_cancelled'
+  | 'plan_migrated';
 
 export interface IAuditLog extends Document {
   actorAdminId: mongoose.Types.ObjectId;
@@ -39,6 +47,14 @@ const AuditLogSchema = new Schema(
         'diet_update',
         'check_in_scheduled',
         'client_created',
+        'client_update',
+        'profile_photo_changed',
+        'password_reset',
+        'plan_assigned',
+        'plan_renewed',
+        'plan_replaced',
+        'plan_cancelled',
+        'plan_migrated',
       ],
       required: true,
       index: true,

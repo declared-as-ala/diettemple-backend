@@ -6,6 +6,13 @@ jest.mock('../models/Subscription.model', () => ({
   __esModule: true,
   default: { findOne: jest.fn() },
 }));
+jest.mock('../models/LevelTemplate.model', () => ({
+  __esModule: true,
+  default: { findById: jest.fn(() => ({ select: jest.fn(() => ({ lean: jest.fn().mockResolvedValue({ weeks: [{}, {}, {}, {}, {}] }) })) })) },
+}));
+jest.mock('./planAssignmentLifecycle.service', () => ({
+  reconcileUserAssignments: jest.fn().mockResolvedValue(null),
+}));
 
 import { Types } from 'mongoose';
 import PlanAssignment from '../models/PlanAssignment.model';
