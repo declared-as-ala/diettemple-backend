@@ -5,6 +5,10 @@ import User from '../../models/User.model';
 import LevelTemplate from '../../models/LevelTemplate.model';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { emitUserUpdated } from '../../realtime/userRealtime';
+import {
+  archiveWorkoutAssignmentForSubscription,
+  syncWorkoutAssignmentFromSubscription,
+} from '../../services/workoutAssignment.service';
 
 const router = Router();
 const now = new Date();
@@ -77,12 +81,20 @@ router.post(
           },
         ],
       });
+      const assignment = await syncWorkoutAssignmentFromSubscription({
+        subscriptionId: doc._id,
+        userId: doc.userId,
+        levelTemplateId: doc.levelTemplateId,
+        startDate: doc.startAt,
+        assignedBy: req.user?._id,
+        note,
+      });
       const sub = await Subscription.findById(doc._id)
         .populate('userId', 'name email phone')
         .populate('levelTemplateId', 'name')
         .lean();
       await emitUserUpdated(String(userId));
-      res.status(201).json({ subscription: sub });
+      res.status(201).json({ subscription: sub, assignment });
     } catch (err: unknown) {
       res.status(500).json({ message: (err as Error).message });
     }
@@ -205,6 +217,14 @@ router.put(
         note: req.body.note ?? 'Repartir semaine 1',
       });
       await sub.save();
+      await syncWorkoutAssignmentFromSubscription({
+        subscriptionId: sub._id,
+        userId: sub.userId,
+        levelTemplateId: sub.levelTemplateId,
+        startDate: sub.startAt,
+        assignedBy: req.user?._id,
+        note: req.body.note ?? 'Repartir semaine 1',
+      });
       const out = await Subscription.findById(sub._id)
         .populate('userId', 'name email phone')
         .populate('levelTemplateId', 'name')
@@ -295,6 +315,14 @@ router.put(
         note: req.body.note,
       });
       await sub.save();
+      await syncWorkoutAssignmentFromSubscription({
+        subscriptionId: sub._id,
+        userId: sub.userId,
+        levelTemplateId: sub.levelTemplateId,
+        startDate: sub.startAt,
+        assignedBy: req.user?._id,
+        note: req.body.note,
+      });
       const out = await Subscription.findById(sub._id)
         .populate('userId', 'name email phone')
         .populate('levelTemplateId', 'name')
@@ -326,6 +354,7 @@ router.put(
         note: req.body.note,
       });
       await sub.save();
+      await archiveWorkoutAssignmentForSubscription(sub._id);
       const out = await Subscription.findById(sub._id)
         .populate('userId', 'name email phone')
         .populate('levelTemplateId', 'name')

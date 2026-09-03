@@ -7,6 +7,7 @@ export type CompletionType = 'normal' | 'rattrapage';
 export interface IPlanAssignment extends Document {
   userId: mongoose.Types.ObjectId;
   levelTemplateId: mongoose.Types.ObjectId;
+  sourceSubscriptionId?: mongoose.Types.ObjectId;
   overridesByWeek?: Array<{
     weekNumber: number;
     days: Record<(typeof DAY_KEYS)[number], Array<{
@@ -45,6 +46,11 @@ const PlanAssignmentSchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'LevelTemplate',
       required: true,
+    },
+    sourceSubscriptionId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Subscription',
+      index: true,
     },
     overridesByWeek: {
       type: [{

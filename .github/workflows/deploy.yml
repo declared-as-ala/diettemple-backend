@@ -93,6 +93,7 @@ jobs:
             # Seed products after backend is ready
             echo "Waiting for backend to be ready..."
             sleep 5
+            docker exec diettemple_backend node dist/scripts/backfillSubscriptionPlanAssignments.js
             docker exec diettemple_backend node dist/scripts/seedProducts.js || echo "Seed products skipped (might already exist or DB not ready)"
 
             # Cleanup old Docker images

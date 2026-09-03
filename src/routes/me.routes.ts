@@ -36,6 +36,7 @@ import {
 import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
 import { findMostRecentOverdueSession, findOverdueSessions } from '../services/catchUp.service';
 import { calculateTrainingWeekProgress } from '../services/weeklyProgress.service';
+import { resolveWorkoutAssignment } from '../services/workoutAssignment.service';
 
 const router = Router();
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -276,7 +277,7 @@ router.get(
       // ── 1. Load plan sources — PlanAssignment (preferred) or Subscription (legacy) ──
       // PlanAssignment is the authoritative source for the 5-week workout plan.
       // Subscription controls payment access and is kept separate.
-      const planAssignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
+      const planAssignment = await resolveWorkoutAssignment(userId);
 
       let sub = await Subscription.findOne({
         userId,
@@ -449,6 +450,19 @@ router.get(
             planAssignmentId: planAssignment ? String((planAssignment as any)._id) : null,
           }
         : null;
+
+      console.info('[DietTemple Schedule]', {
+        userId: String(userId),
+        assignmentId: planAssignment ? String((planAssignment as any)._id) : null,
+        assignmentSource: planAssignment?.source ?? null,
+        planId: effectiveLevelId ? String(effectiveLevelId) : null,
+        assignmentStartDate: effectivePlanStart?.toISOString() ?? null,
+        currentDate: today.toISOString(),
+        currentWeek: weekNumber,
+        currentDay: dayName,
+        resolvedWorkoutId: todaySession?.sessionTemplateId ? String(todaySession.sessionTemplateId) : null,
+        isRestDay: !todaySession?.sessionTemplateId,
+      });
 
       // ── Completion + missed workout detection (last 14 days back to today) ──
       type MissedSessionShape = {
@@ -955,7 +969,7 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
     /** Matches admin "Contenu Home" keys (Intiate, Fighter, …). */
     const slugFromUserLevel = userLevel ? toLevelSlug(userLevel) : null;
 
-    const planAssignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
+    const planAssignment = await resolveWorkoutAssignment(userId, now);
     const sub = await Subscription.findOne({
       userId,
       status: 'ACTIVE',
@@ -1066,7 +1080,7 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     const date = typeof req.query.date === 'string' ? req.query.date : undefined;
     const inputDate = date ? new Date(date) : new Date();
 
-    const planAssignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
+    const planAssignment = await resolveWorkoutAssignment(userId, inputDate);
     const anchorStart = planAssignment ? new Date((planAssignment as any).startDate) : inputDate;
     const weekNumber = getCurrentWeekNumber(anchorStart, 5, inputDate);
     const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
@@ -1144,7 +1158,7 @@ router.get(
       const userId = req.user?._id;
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
-      const assignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
+      const assignment = await resolveWorkoutAssignment(userId);
       if (!assignment) {
         return res.json({ plan: null, message: 'No active workout assignment found' });
       }
@@ -1357,7 +1371,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const assignment = await PlanAssignment.findOne({ userId, status: 'active' }).lean();
+    const assignment = await resolveWorkoutAssignment(userId);
     if (!assignment) {
       return res.json({ assignment: null, plan: null, progress: null, subscription: null });
     }
