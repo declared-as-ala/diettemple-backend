@@ -8,11 +8,6 @@ import dotenv from 'dotenv';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Optional: use OpenRouter key for local testing if not in .env (so AI runs)
-if (!process.env.OPENROUTER_API_KEY) {
-  process.env.OPENROUTER_API_KEY = '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';
-}
-
 const imagePath = process.argv[2];
 if (!imagePath) {
   console.error('Usage: npx ts-node src/scripts/run-gym-verify.ts <path-to-image>');

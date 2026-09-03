@@ -3,22 +3,14 @@
  *
  * Pipeline:
  *   1. Local image hygiene (size, dimensions, screenshot heuristic, darkness).
- *   2. Groq vision (Llama 4 Scout) when GROQ_API_KEY is set — fast, same JSON contract.
- *   3. OpenRouter vision classifier (fallback when Groq unavailable).
- *   4. Local CLIP zero-shot classifier (fallback when both remotes fail).
- *   4. Decision layer (threshold, margin, geofence, upload source).
- *
- * Only returns `provider_error` when BOTH the remote and local classifiers fail
- * (extremely rare — a true outage). This prevents the production outage where
- * every free OpenRouter model 404/429s and the app becomes unusable.
+ *   2. Gemini vision classification.
+ *   3. Decision layer (threshold, margin, geofence, upload source).
  */
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import sharp from 'sharp';
-import { classifyGymSceneOpenRouter } from './openRouterGymDetection.service';
-import { classifyGymSceneGroq } from './groqGymDetection.service';
-import { classifyGymSceneClip } from './clipGymClassifier.service';
+import { classifyGymSceneGemini } from './geminiVision.service';
 import { decideVerification } from './gymVerificationDecision';
 
 const MIN_SIZE_BYTES = 200 * 1024; // 200KB
@@ -127,7 +119,6 @@ function tipsForReason(code: RejectReason): string[] {
 
 export interface ValidateGymPhotoOptions {
   gpsDistanceMeters?: number;
-  openaiApiKey?: string;
   /** When true (e.g. after 2 failed attempts), use THRESHOLD_LOW for safety net */
   relaxedThreshold?: boolean;
 }
@@ -197,46 +188,17 @@ export async function validateGymPhoto(
   }
 
   try {
-    // Primary: Groq vision when configured; else OpenRouter; else local CLIP.
-    let classification: {
+    const classification: {
       topPrediction: string;
       confidence: number;
       topPredictions: Array<{ label: string; score: number }>;
       model: string;
-    } = await classifyGymSceneGroq(pathToUse);
-
-    if (classification.model === 'none') {
-      console.warn('[gym-verify] Groq unavailable or failed — trying OpenRouter.');
-      classification = await classifyGymSceneOpenRouter(pathToUse);
-    }
-
-    if (classification.model === 'none') {
-      console.warn('[gym-verify] OpenRouter unavailable — falling back to local CLIP classifier.');
-      try {
-        const local = await classifyGymSceneClip(pathToUse);
-        if (local.model && local.confidence > 0 && local.topPredictions.length > 0) {
-          classification = {
-            topPrediction: local.topPrediction,
-            confidence: local.confidence,
-            topPredictions: local.topPredictions,
-            model: `local:${local.model}`,
-          };
-          console.log(
-            '[gym-verify] Local classifier result: label=%s confidence=%s model=%s',
-            local.topPrediction,
-            local.confidence.toFixed(2),
-            local.model
-          );
-        }
-      } catch (e) {
-        console.error('[gym-verify] Local CLIP fallback failed', e);
-      }
-    }
+    } = await classifyGymSceneGemini(pathToUse);
 
     const aiScore = classification.confidence;
 
     if (classification.model === 'none') {
-      console.log('[gym-verify] REJECTED — provider_error: Groq, OpenRouter, and local CLIP unavailable.');
+      console.log('[gym-verify] REJECTED — provider_error: Gemini unavailable.');
       if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
       return {
         accepted: false,

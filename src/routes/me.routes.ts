@@ -681,7 +681,7 @@ const scanMealUpload = multer({
   },
 }).single('photo');
 
-// POST /api/me/nutrition/scan-meal — Groq then OpenRouter vision (no auto-save). Multipart (photo) or JSON (imageBase64).
+// POST /api/me/nutrition/scan-meal — Gemini vision (no auto-save). Multipart (photo) or JSON (imageBase64).
 router.post(
   '/nutrition/scan-meal',
   (req: Request, res: Response, next: NextFunction) => {
@@ -751,15 +751,10 @@ router.post(
       const resized = await resizeMealImageIfNeeded(imageBuffer, validation.mime);
       if (resized !== imageBuffer) imageBuffer = resized;
 
-      const { analyzeMealWithGroq } = await import('../lib/mealScanGroq.service');
-      const { analyzeMealWithOpenRouter } = await import('../lib/mealScanOpenRouter.service');
+      const { analyzeMealWithGemini } = await import('../lib/geminiVision.service');
       const { searchSuggestedFoods } = await import('../lib/mealScanVision');
 
-      let result = await analyzeMealWithGroq(imageBuffer, validation.mime);
-      if (!result.ok) {
-        console.warn('[meal-scan] Groq failed or skipped, trying OpenRouter', result.code);
-        result = await analyzeMealWithOpenRouter(imageBuffer, validation.mime);
-      }
+      const result = await analyzeMealWithGemini(imageBuffer, validation.mime);
 
       if (!result.ok) {
         return res.status(503).json({

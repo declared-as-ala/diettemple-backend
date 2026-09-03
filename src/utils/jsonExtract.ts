@@ -1,5 +1,5 @@
 /**
- * Robust JSON extraction from OpenRouter/LLM response (same style as gym).
+ * Robust JSON extraction from AI model responses.
  * Handles: raw JSON, JSON inside ```json ... ```, extra text before/after.
  */
 

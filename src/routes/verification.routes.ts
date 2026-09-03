@@ -1,7 +1,7 @@
 /**
  * Gym Presence Verification API.
  * POST /api/verification/gym-presence — image + GPS + uploadSource → verified, confidence, trustLevel, etc.
- * Uses Groq (when GROQ_API_KEY) then OpenRouter for gym vision; geofence + decision logic; temp file cleanup.
+ * Uses Gemini for gym vision; geofence + decision logic; temp file cleanup.
  */
 import { Router, Response } from 'express';
 import multer from 'multer';
@@ -10,8 +10,7 @@ import fs from 'fs';
 import os from 'os';
 import { body, validationResult } from 'express-validator';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { classifyGymSceneOpenRouter } from '../lib/openRouterGymDetection.service';
-import { classifyGymSceneGroq } from '../lib/groqGymDetection.service';
+import { classifyGymSceneGemini } from '../lib/geminiVision.service';
 import { checkGeofence } from '../lib/geofence';
 import { decideVerification, type UploadSource } from '../lib/gymVerificationDecision';
 import GymPresenceVerification from '../models/GymPresenceVerification.model';
@@ -109,10 +108,7 @@ router.post(
 
       let classification;
       try {
-        classification = await classifyGymSceneGroq(req.file.path);
-        if (classification.model === 'none') {
-          classification = await classifyGymSceneOpenRouter(req.file.path);
-        }
+        classification = await classifyGymSceneGemini(req.file.path);
       } catch (e: any) {
         if (filePath && fs.existsSync(filePath)) {
           try {
@@ -236,7 +232,6 @@ router.post(
         thresholds: decision.thresholds,
         checks,
         serverTimestamp: serverTimestamp.toISOString(),
-        ...(classification.modelResponses && { modelResponses: classification.modelResponses }),
       });
     } catch (e: any) {
       if (filePath && fs.existsSync(filePath)) {
