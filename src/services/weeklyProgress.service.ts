@@ -8,6 +8,7 @@ import LevelTemplate from '../models/LevelTemplate.model';
 import PlanAssignment from '../models/PlanAssignment.model';
 import WorkoutSession from '../models/WorkoutSession.model';
 import { utcDateKey, getWeekWindow } from '../utils/scheduleDate';
+import { businessDateAsUtcCalendarDate } from '../utils/businessDate';
 import {
   resolveWeekSessions,
   computeSessionSchedule,
@@ -142,7 +143,8 @@ export async function calculateTrainingWeekProgress(
   const sessions = resolveWeekSessions(week);
   const isRestWeek = !!week?.isRestWeek;
 
-  const { weekStart, weekEnd } = getWeekWindow(new Date((assignment as any).startDate), weekNumber);
+  const planStart = businessDateAsUtcCalendarDate(new Date((assignment as any).startDate));
+  const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber);
   const catchUpWindowHours =
     (level as any).catchUpWindowHours ?? DEFAULT_CATCH_UP_WINDOW_HOURS;
   const minimumRestHoursBetweenSessions =
@@ -171,7 +173,7 @@ export async function calculateTrainingWeekProgress(
   const sessionResults: WeeklyProgressSession[] = sessions.map((s) => {
     const sid = String(s.sessionTemplateId);
     const { recommendedAt, dueAt } = computeSessionSchedule(
-      new Date((assignment as any).startDate),
+      planStart,
       weekNumber,
       s,
       { catchUpWindowHours }

@@ -15,6 +15,17 @@ export function businessDateKey(value: Date = new Date()): string {
   return `${read('year')}-${read('month')}-${read('day')}`;
 }
 
+/**
+ * Convert a stored business-date instant to UTC midnight for date-only API
+ * responses and schedule arithmetic. For example, Tunis midnight on
+ * 2026-09-03 is stored as 2026-09-02T23:00Z, but its calendar representation
+ * must remain 2026-09-03 rather than being truncated to the previous UTC day.
+ */
+export function businessDateAsUtcCalendarDate(value: string | Date): Date {
+  const key = value instanceof Date ? businessDateKey(value) : value.slice(0, 10);
+  return new Date(`${key}T00:00:00.000Z`);
+}
+
 function dateKeyOrdinal(key: string): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
   if (!match) throw new Error('Date must use YYYY-MM-DD');

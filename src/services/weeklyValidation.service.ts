@@ -4,6 +4,7 @@ import WorkoutSession from '../models/WorkoutSession.model';
 import WeeklySummary from '../models/WeeklySummary.model';
 import { getCurrentWeekNumber, getWeekWindow, resolveWeekSessions } from './planSchedule.service';
 import { utcDateKey } from '../utils/scheduleDate';
+import { businessDateAsUtcCalendarDate } from '../utils/businessDate';
 
 const DAY_LABELS_FR = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
@@ -75,7 +76,7 @@ export async function calculateWeeklyValidation(
   const failureReasons: string[] = [];
 
   if (assignment) {
-    const assignmentStart = new Date((assignment as any).startDate);
+    const assignmentStart = businessDateAsUtcCalendarDate(new Date((assignment as any).startDate));
     weekNumber = getCurrentWeekNumber(assignmentStart, (assignment as any).durationWeeks || 5, ref);
     ({ weekStart, weekEnd } = getWeekWindow(assignmentStart, weekNumber));
 

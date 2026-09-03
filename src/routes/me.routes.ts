@@ -37,6 +37,7 @@ import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } fro
 import { findMostRecentOverdueSession, findOverdueSessions } from '../services/catchUp.service';
 import { calculateTrainingWeekProgress } from '../services/weeklyProgress.service';
 import { resolveWorkoutAssignment } from '../services/workoutAssignment.service';
+import { addBusinessDays, businessDateAsUtcCalendarDate, businessDateKey } from '../utils/businessDate';
 
 const router = Router();
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -130,9 +131,7 @@ function normalizeSessionTitle(raw: unknown): string {
 }
 
 function normalizePlanStartDate(raw: Date): Date {
-  const d = new Date(raw);
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
+  return businessDateAsUtcCalendarDate(raw);
 }
 
 /**
@@ -1326,8 +1325,8 @@ router.get(
 
       const levelDoc = (await LevelTemplate.findById((assignment as any).levelTemplateId).select('name clientDisplayName').lean() as any);
       const levelName = levelDoc?.clientDisplayName || levelDoc?.name || null;
-      const planStartDate = assignment.startDate;
-      const planEndDate = assignment.endDate;
+      const planStartDate = normalizePlanStartDate(new Date(assignment.startDate));
+      const planEndDate = businessDateAsUtcCalendarDate(new Date(assignment.endDate));
 
       // Additive: overall week status (PASSED/CATCH_UP/etc), computed via the same
       // centralized service the admin dashboard uses — see weeklyProgress.service.ts.
@@ -1483,7 +1482,8 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
       assignment: {
         id: String((assignment as any)._id),
         startDate: utcDateKey(planStart),
-        endDate: utcDateKey(planEnd),
+        // PlanAssignment.endDate is exclusive; mobile displays the last active day.
+        endDate: businessDateKey(addBusinessDays(new Date((assignment as any).endDate), -1)),
         durationWeeks,
         status: (assignment as any).status,
       },
