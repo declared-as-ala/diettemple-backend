@@ -89,6 +89,10 @@ export const authService = {
       throw new Error('Invalid credentials');
     }
 
+    if (user.isActive === false) {
+      throw new Error('Account disabled. Please contact support.');
+    }
+
     const isPasswordValid = await bcrypt.compare(data.password, user.passwordHash);
 
     if (!isPasswordValid) {
@@ -230,6 +234,10 @@ export const authService = {
       console.error(`[Biometric Login] User not found: ${emailOrPhone}`);
       throw new Error('User not found');
     }
+
+    if (user.isActive === false) {
+      throw new Error('Account disabled. Please contact support.');
+    }
     
     console.log(`[Biometric Login] User found: ${user.email || user.phone}, biometricEnabled: ${user.biometricEnabled}`);
 
@@ -248,4 +256,3 @@ export const authService = {
     };
   },
 };
-

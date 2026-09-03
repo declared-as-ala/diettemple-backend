@@ -542,6 +542,9 @@ router.get(
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('search').optional().isString(),
+    query('role').optional().isIn(['user', 'admin', 'employee', 'coach', 'nutritionist']),
+    query('level').optional().isIn(['Intiate', 'Fighter', 'Warrior', 'Champion', 'Elite']),
+    query('status').optional().isIn(['active', 'disabled']),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
@@ -549,7 +552,11 @@ router.get(
       const limit = parseInt(req.query.limit as string) || 20;
       const skip = (page - 1) * limit;
 
-      const filter: any = { role: { $ne: 'admin' } }; // Don't show admins in user list
+      const filter: any = {};
+      if (req.query.role) filter.role = req.query.role;
+      if (req.query.level) filter.level = req.query.level;
+      if (req.query.status === 'active') filter.isActive = { $ne: false };
+      if (req.query.status === 'disabled') filter.isActive = false;
       if (req.query.search) {
         filter.$or = [
           { name: { $regex: req.query.search, $options: 'i' } },
@@ -574,9 +581,22 @@ router.get(
       );
 
       const total = await User.countDocuments(filter);
+      const [active, disabled, roleDistribution, levelDistribution] = await Promise.all([
+        User.countDocuments({ isActive: { $ne: false } }),
+        User.countDocuments({ isActive: false }),
+        User.aggregate([{ $group: { _id: '$role', count: { $sum: 1 } } }]),
+        User.aggregate([{ $group: { _id: '$level', count: { $sum: 1 } } }]),
+      ]);
 
       res.json({
         users: usersWithOrders,
+        summary: {
+          total: active + disabled,
+          active,
+          disabled,
+          roleDistribution: roleDistribution.map((item) => ({ role: item._id || 'user', count: item.count })),
+          levelDistribution: levelDistribution.map((item) => ({ level: item._id || 'Intiate', count: item.count })),
+        },
         pagination: {
           page,
           limit,
@@ -776,9 +796,35 @@ router.put(
         return res.status(404).json({ message: 'User not found' });
       }
 
-      // You can add an isActive field to User model if needed
-      // For now, we'll just return success
+      user.isActive = false;
+      await user.save();
+      await emitUserUpdated(String(user._id));
       res.json({ message: 'User disabled successfully', user });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// PUT /admin/users/:id/status - Activate or disable a user account
+router.put(
+  '/users/:id/status',
+  [param('id').isMongoId(), body('isActive').isBoolean()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
+      if (String(req.user?._id) === req.params.id && req.body.isActive === false) {
+        return res.status(400).json({ message: 'You cannot disable your own account' });
+      }
+      const user = await User.findByIdAndUpdate(
+        req.params.id,
+        { $set: { isActive: req.body.isActive } },
+        { new: true, runValidators: true }
+      ).select('-passwordHash -otp -otpExpires');
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      await emitUserUpdated(String(user._id));
+      res.json({ user, message: req.body.isActive ? 'User activated' : 'User disabled' });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1008,7 +1054,7 @@ router.put(
   '/users/:id/role',
   [
     param('id').isMongoId(),
-    body('role').isIn(['user', 'admin', 'coach', 'nutritionist']).withMessage('Invalid role'),
+    body('role').isIn(['user', 'admin', 'employee', 'coach', 'nutritionist']).withMessage('Invalid role'),
   ],
   asyncHandler(async (req: AuthRequest, res: Response) => {
     const errors = validationResult(req);

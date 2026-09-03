@@ -49,6 +49,10 @@ export const authenticate = async (
       return res.status(401).json({ message: 'User not found' });
     }
 
+    if (user.isActive === false) {
+      return res.status(403).json({ message: 'Account disabled' });
+    }
+
     console.log(`[Auth Middleware] User authenticated: ${user.email || user.phone}`);
     req.user = user;
     next();

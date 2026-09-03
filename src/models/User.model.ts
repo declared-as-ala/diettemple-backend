@@ -13,6 +13,7 @@ export interface IUser extends Document {
   objectif?: string;
   level?: 'Intiate' | 'Fighter' | 'Warrior' | 'Champion' | 'Elite';
   role?: 'user' | 'admin' | 'employee' | 'coach' | 'nutritionist';
+  isActive: boolean;
   biometricEnabled: boolean;
   biometricType: 'fingerprint' | 'faceid' | null;
   otp?: string;
@@ -92,6 +93,11 @@ const UserSchema: Schema = new Schema(
       type: String,
       enum: ['user', 'admin', 'employee', 'coach', 'nutritionist'],
       default: 'user',
+      index: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
       index: true,
     },
     biometricEnabled: {
