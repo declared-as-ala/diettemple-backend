@@ -1,4 +1,5 @@
 import { orderEmailHtml, orderEmailText } from './orderEmailTemplate';
+import { dietTempleLogoPath, dietTempleLogoCid } from '../utils/brandAssets';
 import nodemailer from 'nodemailer';
 
 
@@ -71,6 +72,7 @@ export async function sendOrderConfirmationEmail(order: IOrder): Promise<void> {
       html,
       text: orderEmailText(order),
       replyTo: emailUser,
+      attachments: [{ filename: 'diettemple-logo.png', path: dietTempleLogoPath, cid: dietTempleLogoCid, contentDisposition: 'inline' }],
     });
 
     console.log(`✅ Order confirmation email sent successfully!`);
@@ -110,6 +112,7 @@ export async function sendOrderNotificationEmail(order: IOrder): Promise<void> {
       html,
       text: orderEmailText(order),
       replyTo: emailUser,
+      attachments: [{ filename: 'diettemple-logo.png', path: dietTempleLogoPath, cid: dietTempleLogoCid, contentDisposition: 'inline' }],
     });
 
     console.log(`✅ Order notification email sent successfully!`);
