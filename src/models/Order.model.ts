@@ -20,8 +20,8 @@ export interface IOrder extends Document {
   deliveryAddress?: {
     fullName: string;
     street: string;
-    city: string;
-    delegation: string;
+    city?: string;
+    delegation?: string;
     phone: string;
     email: string;
   };

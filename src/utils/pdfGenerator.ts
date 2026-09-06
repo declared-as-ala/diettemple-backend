@@ -114,7 +114,7 @@ export async function generateOrderPDF(order: IOrder): Promise<Buffer> {
           .fillColor('#333333')
           .text(order.deliveryAddress.fullName, 50, doc.y)
           .text(order.deliveryAddress.street, 50, doc.y)
-          .text(`${order.deliveryAddress.city}, ${order.deliveryAddress.delegation}`, 50, doc.y)
+          .text([order.deliveryAddress.city, order.deliveryAddress.delegation].filter(Boolean).join(', '), 50, doc.y)
           .text(`Téléphone: ${order.deliveryAddress.phone}`, 50, doc.y)
           .text(`Email: ${order.deliveryAddress.email}`, 50, doc.y)
           .moveDown(1.5);
