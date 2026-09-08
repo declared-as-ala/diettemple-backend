@@ -1110,11 +1110,15 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
       userId,
       status: 'completed',
       date: { $gte: weekStart, $lt: weekEnd },
-    }).select('date').lean();
+    }).select('date originalScheduledDate completionType').lean();
 
-    const workoutDateKeys = new Set(
-      (completedSessions as Array<{ date: Date }>).map((doc) => utcDateKey(new Date(doc.date)))
-    );
+    const workoutDateKeys = new Set<string>();
+    for (const doc of completedSessions as Array<{ date: Date; originalScheduledDate?: Date; completionType?: string }>) {
+      workoutDateKeys.add(utcDateKey(new Date(doc.date)));
+      if (doc.completionType === 'rattrapage' && doc.originalScheduledDate) {
+        workoutDateKeys.add(utcDateKey(new Date(doc.originalScheduledDate)));
+      }
+    }
 
     const nutritionLogs = await DailyNutritionLog.find({
       userId,
@@ -1127,7 +1131,7 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     );
 
     const todayKey = utcDateKey(new Date());
-    const DAY_LABELS_FR = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'];
+    const FR_DAY_ABBR = ['DIM', 'LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM'];
     const days = [];
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(weekStart.getTime() + i * MS_PER_DAY);
@@ -1140,9 +1144,12 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
         ? nutritionGoalCompleted
         : (workoutCompleted && nutritionGoalCompleted);
 
+      const dow = dayDate.getUTCDay(); // 0 = DIM, 1 = LUN, ..., 6 = SAM
+      const label = FR_DAY_ABBR[dow];
+
       days.push({
         date: dateKey,
-        label: DAY_LABELS_FR[i],
+        label,
         workoutCompleted,
         nutritionGoalCompleted,
         hasScheduledWorkout,
