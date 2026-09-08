@@ -38,6 +38,9 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('search').optional().isString(),
     query('active').optional().isIn(['true', 'false']),
+    query('gender').optional().isIn(['M', 'F']),
+    query('objective').optional().isString(),
+    query('level').optional().isString(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
@@ -54,6 +57,9 @@ router.get(
       }
       if (req.query.active === 'true') filter.isActive = true;
       if (req.query.active === 'false') filter.isActive = false;
+      if (req.query.gender) filter.gender = req.query.gender;
+      if (req.query.objective) filter.objective = req.query.objective;
+      if (req.query.level) filter.level = req.query.level;
 
       const [levelTemplates, total] = await Promise.all([
         LevelTemplate.find(filter).sort({ name: 1 }).skip(skip).limit(limit).lean(),
@@ -93,6 +99,7 @@ router.post(
     body('name').notEmpty().trim().isLength({ min: 2, max: 100 }).withMessage('Le nom interne du plan doit contenir entre 2 et 100 caractères.'),
     body('clientDisplayName').notEmpty().trim().isLength({ min: 2, max: 120 }).withMessage('Veuillez saisir le nom affiché au client.'),
     body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
+    body('objective').optional().isString().trim(),
     body('description').optional().isString(),
     body('imageUrl').optional().isString(),
     body('isActive').optional().isBoolean(),
@@ -123,6 +130,7 @@ router.post(
         name: req.body.name.trim(),
         clientDisplayName: req.body.clientDisplayName ? req.body.clientDisplayName.trim() : req.body.name.trim(),
         level: req.body.level || 'INITIATE',
+        objective: req.body.objective ? req.body.objective.trim() : undefined,
         description: req.body.description,
         imageUrl: req.body.imageUrl,
         isActive: req.body.isActive !== false,
@@ -148,6 +156,7 @@ router.put(
     body('name').optional().trim().isLength({ min: 2, max: 100 }).withMessage('Le nom interne du plan doit contenir entre 2 et 100 caractères.'),
     body('clientDisplayName').optional().trim().isLength({ min: 2, max: 120 }).withMessage('Le nom affiché au client doit contenir entre 2 et 120 caractères.'),
     body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
+    body('objective').optional().isString().trim(),
     body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
     body('minimumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('minimumSessionsPerWeek must be 1-7'),
     body('maximumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('maximumSessionsPerWeek must be 1-7'),
@@ -166,6 +175,7 @@ router.put(
       if (req.body.name != null && req.body.name.trim() !== '') plan.name = req.body.name.trim();
       if (req.body.clientDisplayName != null && req.body.clientDisplayName.trim() !== '') plan.clientDisplayName = req.body.clientDisplayName.trim();
       if (req.body.level !== undefined) plan.level = req.body.level;
+      if (req.body.objective !== undefined) plan.objective = req.body.objective ? req.body.objective.trim() : undefined;
       if (req.body.description != null) plan.description = req.body.description;
       if (req.body.imageUrl !== undefined) plan.imageUrl = req.body.imageUrl;
       if (req.body.isActive != null) plan.isActive = req.body.isActive;

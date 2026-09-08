@@ -100,6 +100,7 @@ export interface ILevelTemplate extends Document {
   imageUrl?: string;
   isActive: boolean;
   gender?: 'M' | 'F' | null;
+  objective?: string;
   level: 'INITIATE' | 'FIGHTER' | 'WARRIOR' | 'CHAMPION' | 'ELITE';
   weeks: IWeekTemplate[];
   durationWeeks: number;
@@ -134,7 +135,8 @@ const LevelTemplateSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, index: true },
     clientDisplayName: { type: String, trim: true, index: true },
-    gender: { type: String, enum: ['M', 'F'], default: 'M' },
+    gender: { type: String, enum: ['M', 'F'], default: 'M', index: true },
+    objective: { type: String, trim: true, index: true },
     level: {
       type: String,
       enum: ['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE'],
@@ -187,5 +189,6 @@ const LevelTemplateSchema = new Schema(
 );
 
 LevelTemplateSchema.index({ name: 1, gender: 1 });
+LevelTemplateSchema.index({ gender: 1, objective: 1 });
 
 export default mongoose.model<ILevelTemplate>('LevelTemplate', LevelTemplateSchema);
