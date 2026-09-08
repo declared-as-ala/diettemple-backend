@@ -13,6 +13,7 @@ export interface IExerciseHistory extends Document {
   userId: mongoose.Types.ObjectId;
   exerciseId: mongoose.Types.ObjectId | IExercise;
   lastWeight: number; // Last weight used in kg
+  personalRecord?: number; // Highest weight successfully completed in kg
   lastReps: number[]; // Array of reps for each set [12, 11, 10, 9]
   lastSets: ISetLog[]; // Full set logs from last session
   lastCompletedAt?: Date;
@@ -65,6 +66,10 @@ const ExerciseHistorySchema: Schema = new Schema(
     lastWeight: {
       type: Number,
       required: true,
+      default: 0,
+    },
+    personalRecord: {
+      type: Number,
       default: 0,
     },
     lastReps: {

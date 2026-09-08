@@ -10,7 +10,7 @@ import app from './app';
 import { initializeRealtimeServer } from './realtime/socket';
 import { initMinioBuckets } from './lib/minioClient';
 
-const PORT = parseInt(process.env.PORT || '5000', 10);
+const PORT = parseInt(process.env.PORT || process.env.API_PORT || '5000', 10);
 
 async function migrateLevelTemplates() {
   try {

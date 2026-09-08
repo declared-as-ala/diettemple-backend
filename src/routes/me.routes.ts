@@ -1634,12 +1634,18 @@ router.post(
 
       const lastSet = normalizedSets[normalizedSets.length - 1];
       const totalVolume = normalizedSets.reduce((sum, s) => sum + s.reps * s.weight, 0);
+      const maxIncomingWeight = normalizedSets.reduce((max, s) => Math.max(max, s.weight), 0);
+
+      const existingHistory = await ExerciseHistory.findOne({ userId, exerciseId }).lean();
+      const currentPr = Number(existingHistory?.personalRecord ?? 0);
+      const personalRecord = Math.max(currentPr, maxIncomingWeight);
 
       const history = await ExerciseHistory.findOneAndUpdate(
         { userId, exerciseId },
         {
           $set: {
             lastWeight: lastSet.weight,
+            personalRecord,
             lastReps: normalizedSets.map((s) => s.reps),
             lastSets: normalizedSets,
             lastCompletedAt: new Date(),
@@ -1655,6 +1661,7 @@ router.post(
         history: {
           exerciseId: history.exerciseId,
           lastWeight: history.lastWeight,
+          personalRecord: history.personalRecord ?? personalRecord,
           lastReps: history.lastReps,
           lastCompletedAt: history.lastCompletedAt,
           totalVolume: history.totalVolume,
@@ -1744,11 +1751,16 @@ router.post(
       for (const ex of exercisesWithVolume) {
         if (!ex.exerciseId) continue;
         const lastSet = ex.sets[ex.sets.length - 1];
+        const maxExWeight = ex.sets.reduce((max, s) => Math.max(max, Number(s.weight ?? 0)), 0);
+        const existingHist = await ExerciseHistoryModel.findOne({ userId, exerciseId: ex.exerciseId }).lean();
+        const personalRecord = Math.max(Number(existingHist?.personalRecord ?? 0), maxExWeight);
+
         await ExerciseHistoryModel.findOneAndUpdate(
           { userId, exerciseId: ex.exerciseId },
           {
             $set: {
               lastWeight: lastSet?.weight ?? 0,
+              personalRecord,
               lastReps: ex.sets.map((s) => s.repsCompleted ?? 0),
               lastSets: ex.sets,
               lastCompletedAt: new Date(),

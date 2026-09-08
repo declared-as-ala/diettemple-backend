@@ -284,11 +284,14 @@ router.post(
           exerciseId: exerciseIdStr,
         });
 
+        const maxCompletedWeight = Math.max(0, ...weights);
+
         if (!history) {
           history = await ExerciseHistory.create({
             userId: req.user._id,
             exerciseId: exerciseIdStr,
             lastWeight: lastWeight,
+            personalRecord: maxCompletedWeight,
             lastReps: reps,
             lastSets: completedSets.map((s, idx) => ({
               setNumber: idx + 1,
@@ -304,6 +307,7 @@ router.post(
         } else {
           // Update history
           history.lastWeight = lastWeight;
+          history.personalRecord = Math.max(Number(history.personalRecord ?? 0), maxCompletedWeight);
           history.lastReps = reps;
           history.lastSets = completedSets.map((s, idx) => ({
             setNumber: idx + 1,
@@ -434,6 +438,39 @@ router.get(
         exerciseId: exerciseId,
       }).populate('exerciseId');
 
+      // Calculate/backfill personal record if not set
+      let personalRecord = Number(history?.personalRecord ?? 0);
+      if (history && (!personalRecord || personalRecord === 0)) {
+        const lastSetsMax = (history.lastSets || []).reduce((max: number, s: any) => Math.max(max, Number(s.weight ?? 0)), 0);
+        personalRecord = Math.max(personalRecord, Number(history.lastWeight ?? 0), lastSetsMax);
+        
+        try {
+          const WorkoutSessionModel = require('../models/WorkoutSession.model').default;
+          const mongoose = require('mongoose');
+          const exObjId = new mongoose.Types.ObjectId(exerciseId);
+          const sessions = await WorkoutSessionModel.find({
+            userId: req.user._id,
+            'exercises.exerciseId': exObjId,
+          }).lean();
+          for (const sess of sessions) {
+            for (const ex of sess.exercises || []) {
+              if (String(ex.exerciseId) === String(exerciseId)) {
+                for (const st of ex.sets || []) {
+                  if (st.completed && Number(st.weight) > personalRecord) {
+                    personalRecord = Number(st.weight);
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        if (personalRecord > 0) {
+          history.personalRecord = personalRecord;
+          void history.save();
+        }
+      }
+
       // Get exercise details
       const exercise = await Exercise.findById(exerciseId);
 
@@ -446,6 +483,7 @@ router.get(
         } : null,
         history: history ? {
           lastWeight: history.lastWeight,
+          personalRecord: history.personalRecord ?? personalRecord,
           lastReps: history.lastReps,
           lastSets: history.lastSets,
           lastCompletedAt: history.lastCompletedAt,
