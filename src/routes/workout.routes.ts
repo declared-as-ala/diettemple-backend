@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { authenticate } from '../middleware/auth.middleware';
 import WorkoutSession from '../models/WorkoutSession.model';
 import ExerciseProgression from '../models/ExerciseProgression.model';
@@ -445,19 +446,19 @@ router.get(
         personalRecord = Math.max(personalRecord, Number(history.lastWeight ?? 0), lastSetsMax);
         
         try {
-          const WorkoutSessionModel = require('../models/WorkoutSession.model').default;
-          const mongoose = require('mongoose');
-          const exObjId = new mongoose.Types.ObjectId(exerciseId);
-          const sessions = await WorkoutSessionModel.find({
-            userId: req.user._id,
-            'exercises.exerciseId': exObjId,
-          }).lean();
-          for (const sess of sessions) {
-            for (const ex of sess.exercises || []) {
-              if (String(ex.exerciseId) === String(exerciseId)) {
-                for (const st of ex.sets || []) {
-                  if (st.completed && Number(st.weight) > personalRecord) {
-                    personalRecord = Number(st.weight);
+          if (mongoose.Types.ObjectId.isValid(exerciseId)) {
+            const exObjId = new mongoose.Types.ObjectId(exerciseId);
+            const sessions = await WorkoutSession.find({
+              userId: req.user._id,
+              'exercises.exerciseId': exObjId,
+            }).lean();
+            for (const sess of sessions) {
+              for (const ex of sess.exercises || []) {
+                if (String(ex.exerciseId) === String(exerciseId)) {
+                  for (const st of ex.sets || []) {
+                    if (st.completed && Number(st.weight) > personalRecord) {
+                      personalRecord = Number(st.weight);
+                    }
                   }
                 }
               }
