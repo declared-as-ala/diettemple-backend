@@ -430,50 +430,24 @@ router.get(
     try {
       const { exerciseId } = req.params;
       
-      // Get coach program
-      const program = await ExerciseProgram.findOne({ exerciseId }).populate('exerciseId');
-      
-      // Get user history
-      const history = await ExerciseHistory.findOne({
-        userId: req.user._id,
-        exerciseId: exerciseId,
-      }).populate('exerciseId');
-
-      // Calculate/backfill personal record if not set
-      let personalRecord = Number(history?.personalRecord ?? 0);
-      if (history && (!personalRecord || personalRecord === 0)) {
-        const lastSetsMax = (history.lastSets || []).reduce((max: number, s: any) => Math.max(max, Number(s.weight ?? 0)), 0);
-        personalRecord = Math.max(personalRecord, Number(history.lastWeight ?? 0), lastSetsMax);
-        
-        try {
-          if (mongoose.Types.ObjectId.isValid(exerciseId)) {
-            const exObjId = new mongoose.Types.ObjectId(exerciseId);
-            const sessions = await WorkoutSession.find({
-              userId: req.user._id,
-              'exercises.exerciseId': exObjId,
-            }).lean();
-            for (const sess of sessions) {
-              for (const ex of sess.exercises || []) {
-                if (String(ex.exerciseId) === String(exerciseId)) {
-                  for (const st of ex.sets || []) {
-                    if (st.completed && Number(st.weight) > personalRecord) {
-                      personalRecord = Number(st.weight);
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (_) {}
-
-        if (personalRecord > 0) {
-          history.personalRecord = personalRecord;
-          void history.save();
-        }
+      if (!exerciseId || !mongoose.Types.ObjectId.isValid(exerciseId)) {
+        return res.status(400).json({ message: 'Invalid exercise ID' });
       }
 
-      // Get exercise details
-      const exercise = await Exercise.findById(exerciseId);
+      // Fetch program, history, and exercise in parallel using lean() for ultra-fast response
+      const [program, history, exercise] = await Promise.all([
+        ExerciseProgram.findOne({ exerciseId }).lean(),
+        ExerciseHistory.findOne({
+          userId: req.user._id,
+          exerciseId: exerciseId,
+        }).lean(),
+        Exercise.findById(exerciseId).lean(),
+      ]);
+
+      const lastSetsMax = (history?.lastSets || []).reduce((max: number, s: any) => Math.max(max, Number(s.weight ?? 0)), 0);
+      const personalRecord = Number(history?.personalRecord ?? 0) > 0
+        ? Number(history?.personalRecord)
+        : Math.max(Number(history?.lastWeight ?? 0), lastSetsMax);
 
       res.json({
         program: program ? {
@@ -484,7 +458,7 @@ router.get(
         } : null,
         history: history ? {
           lastWeight: history.lastWeight,
-          personalRecord: history.personalRecord ?? personalRecord,
+          personalRecord: personalRecord,
           lastReps: history.lastReps,
           lastSets: history.lastSets,
           lastCompletedAt: history.lastCompletedAt,
