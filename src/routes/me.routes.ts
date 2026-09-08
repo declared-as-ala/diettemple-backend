@@ -1072,10 +1072,12 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
     const date = typeof req.query.date === 'string' ? req.query.date : undefined;
-    const inputDate = date ? new Date(date) : new Date();
+    const inputDate = date ? parseCalendarDateForMeToday(date).today : new Date();
 
     const planAssignment = await resolveWorkoutAssignment(userId, inputDate);
-    const anchorStart = planAssignment ? new Date((planAssignment as any).startDate) : inputDate;
+    const anchorStart = planAssignment
+      ? normalizePlanStartDate(new Date((planAssignment as any).startDate))
+      : (date ? parseCalendarDateForMeToday(date).today : new Date());
     const weekNumber = getCurrentWeekNumber(anchorStart, planAssignment?.durationWeeks || 1, inputDate);
     const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
 
@@ -1136,10 +1138,10 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     for (let i = 0; i < 7; i++) {
       const dayDate = new Date(weekStart.getTime() + i * MS_PER_DAY);
       const dateKey = utcDateKey(dayDate);
-      const workoutCompleted = workoutDateKeys.has(dateKey);
+      const hasScheduledWorkout = scheduledDayOffsets.size > 0 ? scheduledDayOffsets.has(i) : false;
+      const isRestDay = !hasScheduledWorkout;
+      const workoutCompleted = hasScheduledWorkout && workoutDateKeys.has(dateKey);
       const nutritionGoalCompleted = nutritionDateKeys.has(dateKey);
-      const hasScheduledWorkout = scheduledDayOffsets.size > 0 ? scheduledDayOffsets.has(i) : true;
-      const isRestDay = !hasScheduledWorkout && !workoutCompleted;
       const isValidated = isRestDay
         ? nutritionGoalCompleted
         : (workoutCompleted && nutritionGoalCompleted);
