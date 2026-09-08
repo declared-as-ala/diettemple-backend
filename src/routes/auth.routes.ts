@@ -179,7 +179,19 @@ router.put(
   authenticate,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { name, photoUri, age, sexe, poids, taille, objectif } = req.body;
+      const {
+        name,
+        photoUri,
+        age,
+        sexe,
+        poids,
+        taille,
+        objectif,
+        email,
+        address,
+        currentPassword,
+        newPassword,
+      } = req.body;
       
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
@@ -190,6 +202,39 @@ router.put(
       if (taille !== undefined) updateData.taille = taille;
       if (objectif !== undefined) updateData.objectif = objectif;
 
+      if (email !== undefined && typeof email === 'string' && email.trim()) {
+        const trimmedEmail = email.trim().toLowerCase();
+        const existing = await User.findOne({ email: trimmedEmail, _id: { $ne: req.user._id } });
+        if (existing) {
+          return res.status(400).json({ message: 'Cette adresse email est déjà utilisée.' });
+        }
+        updateData.email = trimmedEmail;
+      }
+
+      if (address !== undefined) {
+        if (typeof address === 'string') {
+          updateData['address.line1'] = address;
+        } else if (typeof address === 'object' && address !== null) {
+          updateData.address = address;
+        }
+      }
+
+      if (newPassword && typeof newPassword === 'string' && newPassword.trim()) {
+        if (!currentPassword) {
+          return res.status(400).json({ message: 'Le mot de passe actuel est requis pour modifier le mot de passe.' });
+        }
+        if (newPassword.length < 6) {
+          return res.status(400).json({ message: 'Le nouveau mot de passe doit contenir au moins 6 caractères.' });
+        }
+        const currentUser = await User.findById(req.user._id);
+        if (!currentUser) return res.status(404).json({ message: 'Utilisateur introuvable.' });
+        const isMatch = await bcrypt.compare(currentPassword, currentUser.passwordHash);
+        if (!isMatch) {
+          return res.status(400).json({ message: 'Le mot de passe actuel est incorrect.' });
+        }
+        updateData.passwordHash = await bcrypt.hash(newPassword, 10);
+      }
+
       const user = await User.findByIdAndUpdate(
         req.user._id,
         { $set: updateData },
@@ -197,11 +242,11 @@ router.put(
       ).select('-passwordHash -otp -otpExpires');
 
       if (!user) {
-        return res.status(404).json({ message: 'User not found' });
+        return res.status(404).json({ message: 'Utilisateur introuvable.' });
       }
 
       res.json({ 
-        message: 'Profile updated successfully',
+        message: 'Profil mis à jour avec succès',
         user 
       });
     } catch (error: any) {
