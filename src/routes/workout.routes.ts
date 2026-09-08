@@ -262,7 +262,7 @@ router.post(
       // SMART PROGRESSION LOGIC
       const exercise = exerciseSession.exerciseId as any;
       const completedSets = exerciseSession.sets.filter(s => (s as any).completed && s.weight && s.repsCompleted);
-      
+
       if (completedSets.length > 0) {
         // Get coach program (if exists)
         const program = await ExerciseProgram.findOne({ exerciseId: exerciseIdStr });
@@ -278,7 +278,7 @@ router.post(
 
         // PROGRESSION RULE 1: All sets must have >= 12 reps (or target max) to be eligible
         const allPassed = completedSets.every(s => s.repsCompleted! >= targetRepsMax);
-        
+
         // Find or create exercise history
         let history = await ExerciseHistory.findOne({
           userId: req.user._id,
@@ -319,7 +319,7 @@ router.post(
           }));
           history.lastCompletedAt = new Date();
           history.totalVolume = totalVolume;
-          
+
           // PROGRESSION RULE 2: Recommend weight increase only if eligible
           if (allPassed) {
             history.progressionStatus = 'eligible';
@@ -328,14 +328,14 @@ router.post(
             history.progressionStatus = 'failed';
             history.recommendedNextWeight = lastWeight; // Stay same weight
           }
-          
+
           await history.save();
         }
 
         await workoutSession.save();
 
-        res.json({ 
-          workoutSession, 
+        res.json({
+          workoutSession,
           history: {
             lastWeight: history.lastWeight,
             lastReps: history.lastReps,
@@ -429,7 +429,7 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const { exerciseId } = req.params;
-      
+
       if (!exerciseId || !mongoose.Types.ObjectId.isValid(exerciseId)) {
         return res.status(400).json({ message: 'Invalid exercise ID' });
       }
