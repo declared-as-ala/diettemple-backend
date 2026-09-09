@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Router, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import User from '../../models/User.model';
@@ -589,32 +590,82 @@ router.get(
       const limit = parseInt((req.query.limit as string) || '50');
 
       const workoutSessions = await WorkoutSession.find({ userId, status: 'completed' })
+        .populate('exercises.exerciseId', 'name muscleGroup')
         .sort({ date: -1 })
         .limit(80)
         .select('date completedAt exercises')
         .lean();
 
       const histories = await ExerciseHistory.find({ userId })
+        .populate('exerciseId', 'name muscleGroup')
         .sort({ updatedAt: -1 })
         .limit(limit)
         .lean();
 
       const historyByExercise = new Map<string, any>();
       const exerciseIdSet = new Set<string>();
+      const exerciseNameById = new Map<string, { name: string; muscleGroup?: string | null }>();
+
+      // 1. Process ExerciseHistory records
       histories.forEach((h: any) => {
-        const exId = h.exerciseId?.toString?.() || h.exerciseId;
-        if (!exId) return;
-        exerciseIdSet.add(String(exId));
-        historyByExercise.set(String(exId), h);
+        let exId = '';
+        if (h.exerciseId) {
+          if (typeof h.exerciseId === 'object' && h.exerciseId !== null) {
+            if (h.exerciseId._id) {
+              exId = String(h.exerciseId._id);
+            } else if (typeof h.exerciseId.toString === 'function') {
+              const str = h.exerciseId.toString();
+              if (str !== '[object Object]') exId = str;
+            }
+            if (h.exerciseId.name && exId) {
+              exerciseNameById.set(exId, {
+                name: h.exerciseId.name,
+                muscleGroup: h.exerciseId.muscleGroup || null,
+              });
+            }
+          } else {
+            exId = String(h.exerciseId);
+          }
+        }
+        if (!exId || exId === '[object Object]') return;
+        exerciseIdSet.add(exId);
+        historyByExercise.set(exId, h);
       });
 
+      // 2. Process WorkoutSessions
       const sessionsByExercise = new Map<string, Array<any>>();
       workoutSessions.forEach((session: any) => {
         (session.exercises || []).forEach((exerciseSession: any) => {
-          const exId = exerciseSession.exerciseId?.toString?.() || exerciseSession.exerciseId;
-          if (!exId) return;
-          const key = String(exId);
-          exerciseIdSet.add(key);
+          let exId = '';
+          if (exerciseSession.exerciseId) {
+            if (typeof exerciseSession.exerciseId === 'object' && exerciseSession.exerciseId !== null) {
+              if (exerciseSession.exerciseId._id) {
+                exId = String(exerciseSession.exerciseId._id);
+              } else if (typeof exerciseSession.exerciseId.toString === 'function') {
+                const str = exerciseSession.exerciseId.toString();
+                if (str !== '[object Object]') exId = str;
+              }
+              if (exerciseSession.exerciseId.name && exId) {
+                exerciseNameById.set(exId, {
+                  name: exerciseSession.exerciseId.name,
+                  muscleGroup: exerciseSession.exerciseId.muscleGroup || null,
+                });
+              }
+            } else {
+              exId = String(exerciseSession.exerciseId);
+            }
+          }
+
+          if (exId && exerciseSession.exerciseName && !exerciseNameById.has(exId)) {
+            exerciseNameById.set(exId, {
+              name: exerciseSession.exerciseName,
+              muscleGroup: null,
+            });
+          }
+
+          if (!exId || exId === '[object Object]') return;
+          exerciseIdSet.add(exId);
+
           const normalizedSets = (exerciseSession.sets || []).map((s: any) => ({
             setNumber: s.setNumber ?? 0,
             weightKg: s.weight ?? 0,
@@ -622,8 +673,8 @@ router.get(
             completed: !!s.completed,
             completedAt: s.completedAt ?? null,
           }));
-          if (!sessionsByExercise.has(key)) sessionsByExercise.set(key, []);
-          sessionsByExercise.get(key)!.push({
+          if (!sessionsByExercise.has(exId)) sessionsByExercise.set(exId, []);
+          sessionsByExercise.get(exId)!.push({
             sessionDate: session.date ?? null,
             completedAt: session.completedAt ?? null,
             sets: normalizedSets,
@@ -633,13 +684,52 @@ router.get(
 
       const exerciseIds = Array.from(exerciseIdSet);
 
-      const exercises = await Exercise.find({ _id: { $in: exerciseIds } })
-        .select('name muscleGroup')
-        .lean();
-      const exerciseNameById = new Map<string, { name: string; muscleGroup?: string }>();
-      exercises.forEach((e: any) => {
-        exerciseNameById.set(e._id.toString(), { name: e.name, muscleGroup: e.muscleGroup });
-      });
+      // 3. Query any missing exercises by ObjectId / string from Exercise collection
+      const missingIds = exerciseIds.filter((id) => !exerciseNameById.has(id));
+      if (missingIds.length > 0) {
+        const objectIds = missingIds
+          .filter((id) => mongoose.isValidObjectId(id))
+          .map((id) => new mongoose.Types.ObjectId(id));
+
+        const exercises = await Exercise.find({
+          $or: [
+            { _id: { $in: objectIds } },
+            { _id: { $in: missingIds } },
+          ],
+        })
+          .select('name muscleGroup')
+          .lean();
+
+        exercises.forEach((e: any) => {
+          exerciseNameById.set(String(e._id), { name: e.name, muscleGroup: e.muscleGroup || null });
+        });
+      }
+
+      // 4. Also check SessionTemplate items if any are still missing
+      const stillMissingIds = exerciseIds.filter((id) => !exerciseNameById.has(id));
+      if (stillMissingIds.length > 0) {
+        const objectIds = stillMissingIds
+          .filter((id) => mongoose.isValidObjectId(id))
+          .map((id) => new mongoose.Types.ObjectId(id));
+
+        const sessionTemplates = await SessionTemplate.find({
+          'items.exerciseId': { $in: [...objectIds, ...stillMissingIds] },
+        })
+          .populate('items.exerciseId', 'name muscleGroup')
+          .lean();
+
+        sessionTemplates.forEach((st: any) => {
+          (st.items || []).forEach((item: any) => {
+            const itemEx = item.exerciseId;
+            if (itemEx && typeof itemEx === 'object' && itemEx._id && itemEx.name) {
+              exerciseNameById.set(String(itemEx._id), {
+                name: itemEx.name,
+                muscleGroup: itemEx.muscleGroup || null,
+              });
+            }
+          });
+        });
+      }
 
       const grouped = exerciseIds.map((exId) => {
         const h = historyByExercise.get(String(exId));
@@ -648,6 +738,7 @@ router.get(
           exerciseId: exId,
           exerciseName: ex?.name || 'Exercice',
           muscleGroup: ex?.muscleGroup || null,
+          personalRecord: h?.personalRecord ?? 0,
           lastWeight: h?.lastWeight ?? 0,
           lastReps: h?.lastReps ?? [],
           lastCompletedAt: h?.lastCompletedAt ?? null,
