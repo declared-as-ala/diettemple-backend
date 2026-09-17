@@ -80,16 +80,24 @@ router.post(
         }));
       }
 
-      const workoutSession = await WorkoutSession.create({
+      let workoutSession = await WorkoutSession.findOne({
         userId: req.user._id,
         sessionId,
-        date: new Date(),
-        workoutType: title,
-        exercises: exerciseSessions,
-        gymPhotoUrl: null,
-        startedAt: new Date(),
         status: 'active',
-      });
+      }).sort({ startedAt: -1 });
+
+      if (!workoutSession) {
+        workoutSession = await WorkoutSession.create({
+          userId: req.user._id,
+          sessionId,
+          date: new Date(),
+          workoutType: title,
+          exercises: exerciseSessions,
+          gymPhotoUrl: null,
+          startedAt: new Date(),
+          status: 'active',
+        });
+      }
 
       res.status(201).json({ workoutSession });
     } catch (error: any) {
@@ -377,13 +385,28 @@ router.post(
         return res.status(404).json({ message: 'Workout session not found' });
       }
 
-      // Complete the workout session
-      workoutSession.status = 'completed';
-      workoutSession.completedAt = new Date();
+      // Complete the workout session idempotently
+      if (workoutSession.status !== 'completed') {
+        workoutSession.status = 'completed';
+        workoutSession.completedAt = new Date();
+      }
       if (completionType) (workoutSession as any).completionType = completionType;
       if (originalScheduledDate) (workoutSession as any).originalScheduledDate = new Date(originalScheduledDate);
 
       await workoutSession.save();
+
+      // Clean up any dangling active sessions for this user and session
+      if (workoutSession.sessionId) {
+        await WorkoutSession.updateMany(
+          {
+            userId: req.user._id,
+            _id: { $ne: workoutSession._id },
+            sessionId: workoutSession.sessionId,
+            status: 'active',
+          },
+          { $set: { status: 'completed', completedAt: workoutSession.completedAt } }
+        );
+      }
 
       res.json({
         workoutSession,

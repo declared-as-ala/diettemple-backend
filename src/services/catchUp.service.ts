@@ -1,13 +1,24 @@
 /**
- * Generalized catch-up detection: walks a plan's ORDERED sessions (current +
- * recent weeks) and reports which ones are overdue. A catch-up session is
- * always the SAME planned session (same sessionTemplateId / weekNumber /
- * sessionOrder identity) with an OVERDUE status — this service never creates
- * a new "rattrapage session" document; it only reads WorkoutSession history.
+ * Generalized catch-up detection: walks a plan's sessions for the CURRENT program week
+ * and reports which ones are overdue/missed.
+ *
+ * Critical rules:
+ * 1. Completed sessions must NEVER appear as rattrapage.
+ * 2. Rattrapage is strictly valid ONLY during the same program week (missedSession.programWeek === currentProgramWeek).
+ *    Never carry over rattrapages into subsequent weeks.
+ * 3. Multiple rattrapages are sorted in chronological order (oldest first). The first is actionable.
+ * 4. A single session entity is maintained (never duplicate session documents).
  */
 import WorkoutSession from '../models/WorkoutSession.model';
-import { resolveWeekSessions, computeSessionSchedule, computeSessionStatus } from './planSchedule.service';
-import { utcDateKey, MS_PER_DAY } from '../utils/scheduleDate';
+import { resolveWeekSessions } from './planSchedule.service';
+import {
+  utcDateKey,
+  tunisiaDateKey,
+  getPlanDayPosition,
+  getProgramWeekDates,
+  getPlanDayKeyForDate,
+  MS_PER_DAY,
+} from '../utils/scheduleDate';
 import type { ILevelTemplate } from '../models/LevelTemplate.model';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -31,7 +42,10 @@ async function loadCompletionKeys(
   const docs = await WorkoutSession.find({
     userId,
     status: 'completed',
-    date: { $gte: from, $lte: to },
+    $or: [
+      { date: { $gte: from, $lte: to } },
+      { originalScheduledDate: { $gte: from, $lte: to } },
+    ],
   })
     .select('sessionId date completionType originalScheduledDate')
     .lean();
@@ -46,19 +60,24 @@ async function loadCompletionKeys(
   }>) {
     if (!doc.sessionId) continue;
     const sid = String(doc.sessionId);
-    if (doc.completionType === 'rattrapage' && doc.originalScheduledDate) {
-      catchUpOriginalKeys.add(`${sid}|${utcDateKey(new Date(doc.originalScheduledDate))}`);
-    } else {
-      onTimeKeys.add(`${sid}|${utcDateKey(new Date(doc.date))}`);
+    const d = new Date(doc.date);
+    onTimeKeys.add(`${sid}|${utcDateKey(d)}`);
+    onTimeKeys.add(`${sid}|${tunisiaDateKey(d)}`);
+
+    if (doc.originalScheduledDate) {
+      const orig = new Date(doc.originalScheduledDate);
+      catchUpOriginalKeys.add(`${sid}|${utcDateKey(orig)}`);
+      catchUpOriginalKeys.add(`${sid}|${tunisiaDateKey(orig)}`);
     }
   }
   return { onTimeKeys, catchUpOriginalKeys };
 }
 
 /**
- * Returns all currently-overdue sessions (most recent first), scanning back
- * `lookbackDays` from `now`, never before the plan start and never past
- * `durationWeeks`.
+ * Returns all currently-overdue sessions for the CURRENT program week.
+ * Enforces chronological order (oldest first: a.recommendedAt - b.recommendedAt).
+ * Never returns sessions from past program weeks (Requirement 4).
+ * Never returns completed sessions (Requirement 2).
  */
 export async function findOverdueSessions(params: {
   userId: unknown;
@@ -68,64 +87,84 @@ export async function findOverdueSessions(params: {
   now: Date;
   lookbackDays?: number;
 }): Promise<OverdueSession[]> {
-  const { userId, levelDoc, planStart, durationWeeks, now, lookbackDays = 14 } = params;
+  const { userId, levelDoc, planStart, durationWeeks, now } = params;
   if (!levelDoc?.weeks?.length) return [];
 
-  const lookbackStart = new Date(now.getTime() - lookbackDays * MS_PER_DAY);
-  const { onTimeKeys, catchUpOriginalKeys } = await loadCompletionKeys(userId, lookbackStart, now);
-  const catchUpWindowHours = levelDoc.catchUpWindowHours;
+  // Determine the current program week (1-indexed)
+  const { weekIndex } = getPlanDayPosition(now, planStart);
+  if (weekIndex < 0 || weekIndex >= durationWeeks) return [];
+  const currentWeekN = weekIndex + 1;
 
+  // Query completed sessions from planStart through end of current week
+  const weekDates = getProgramWeekDates(planStart, currentWeekN);
+  if (weekDates.length === 0) return [];
+
+  const { onTimeKeys, catchUpOriginalKeys } = await loadCompletionKeys(
+    userId,
+    planStart,
+    new Date(now.getTime() + 7 * MS_PER_DAY)
+  );
+
+  const catchUpWindowHours = levelDoc.catchUpWindowHours ?? 48;
   const results: OverdueSession[] = [];
-  const weekCache = new Map<number, ReturnType<typeof resolveWeekSessions>>();
 
-  for (let back = 0; back <= lookbackDays; back++) {
-    const dayMs = new Date(now.getTime() - back * MS_PER_DAY);
-    if (dayMs.getTime() < planStart.getTime()) break;
+  const week = (levelDoc.weeks as any[]).find((w) => w.weekNumber === currentWeekN) ?? null;
+  const orderedSessions = resolveWeekSessions(week);
 
-    const diffDays = Math.floor((dayMs.getTime() - planStart.getTime()) / MS_PER_DAY);
-    const weekN = Math.floor(diffDays / 7) + 1;
-    if (weekN < 1 || weekN > durationWeeks) continue;
-    const dayOffset = ((diffDays % 7) + 7) % 7;
+  const nowTunisiaKey = tunisiaDateKey(now);
+  const nowUtcKey = utcDateKey(now);
 
-    if (!weekCache.has(weekN)) {
-      const week = (levelDoc.weeks as any[]).find((w) => w.weekNumber === weekN) ?? null;
-      weekCache.set(weekN, resolveWeekSessions(week));
+  for (const date of weekDates) {
+    const dateTunisiaKey = tunisiaDateKey(date);
+    const dateUtcKey = utcDateKey(date);
+
+    // Only past days in the current week can be overdue/missed (Requirement 3)
+    if (dateTunisiaKey >= nowTunisiaKey && dateUtcKey >= nowUtcKey) {
+      continue;
     }
-    const weekSessions = weekCache.get(weekN)!;
-    const sessionsForDay = weekSessions.filter((s) => s.recommendedDayOffset === dayOffset);
 
-    for (const session of sessionsForDay) {
-      const sid = String(session.sessionTemplateId);
-      const { recommendedAt, dueAt } = computeSessionSchedule(planStart, weekN, session, {
-        catchUpWindowHours,
-      });
-      const dateKey = utcDateKey(recommendedAt);
-      const key = `${sid}|${dateKey}`;
-      const isCompleted = onTimeKeys.has(key) || catchUpOriginalKeys.has(key);
+    const dayKey = getPlanDayKeyForDate(date);
+    const placements = (week?.days as any)?.[dayKey] || [];
+
+    for (const placement of placements) {
+      if (!placement?.sessionTemplateId) continue;
+      const sid = String(placement.sessionTemplateId);
+
+      // Check if this session was completed either on-time or via catch-up (Requirement 1 & 2)
+      const isCompleted =
+        onTimeKeys.has(`${sid}|${dateTunisiaKey}`) ||
+        onTimeKeys.has(`${sid}|${dateUtcKey}`) ||
+        catchUpOriginalKeys.has(`${sid}|${dateTunisiaKey}`) ||
+        catchUpOriginalKeys.has(`${sid}|${dateUtcKey}`);
+
       if (isCompleted) continue;
 
-      const status = computeSessionStatus({ recommendedAt, dueAt, now, isCompleted: false });
-      if (status !== 'OVERDUE') continue;
+      const matchedOrdered = orderedSessions.find((s) => String(s.sessionTemplateId) === sid);
+      const recommendedAt = date;
+      const dueAt = new Date(recommendedAt.getTime() + catchUpWindowHours * 60 * 60 * 1000);
 
       results.push({
         sessionTemplateId: sid,
-        weekNumber: weekN,
-        sessionOrder: session.sessionOrder,
-        recommendedDayOffset: session.recommendedDayOffset,
-        originalDate: dateKey,
-        dayName: DAY_NAMES[recommendedAt.getUTCDay()],
+        weekNumber: currentWeekN,
+        sessionOrder: matchedOrdered?.sessionOrder ?? 1,
+        recommendedDayOffset: matchedOrdered?.recommendedDayOffset ?? 0,
+        originalDate: dateTunisiaKey,
+        dayName: DAY_NAMES[date.getUTCDay()],
         recommendedAt,
         dueAt,
       });
     }
   }
 
-  // Most recent first (matches legacy findMostRecentMissedSession behavior).
-  results.sort((a, b) => b.recommendedAt.getTime() - a.recommendedAt.getTime());
+  // Enforce chronological order (oldest first) (Requirement 5)
+  results.sort((a, b) => a.recommendedAt.getTime() - b.recommendedAt.getTime());
   return results;
 }
 
-/** Convenience wrapper for the single-session legacy fields (missedSession/rattrapageSession). */
+/**
+ * Returns the single actionable overdue session (oldest missed session of the current week).
+ * When this session is completed, it immediately disappears and the next oldest becomes actionable.
+ */
 export async function findMostRecentOverdueSession(
   params: Parameters<typeof findOverdueSessions>[0]
 ): Promise<OverdueSession | null> {

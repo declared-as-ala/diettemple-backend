@@ -30,8 +30,11 @@ import {
   PlanDayKey as PlanTemplateDayKey,
   utcStartOfCalendarDate,
   utcDateKey,
+  tunisiaDateKey,
   getPlanDayPosition,
   getWeekWindow,
+  getProgramWeekDates,
+  getPlanDayKeyForDate,
 } from '../utils/scheduleDate';
 import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
 import { findMostRecentOverdueSession, findOverdueSessions } from '../services/catchUp.service';
@@ -154,7 +157,10 @@ async function loadCompletedSessionsByDateKey(
   const completedDocs = await WorkoutSessionModel.find({
     userId,
     status: 'completed',
-    date: { $gte: from, $lte: to },
+    $or: [
+      { date: { $gte: from, $lte: to } },
+      { originalScheduledDate: { $gte: from, $lte: to } },
+    ],
   })
     .select('date sessionId completionType originalScheduledDate')
     .lean();
@@ -167,15 +173,35 @@ async function loadCompletedSessionsByDateKey(
     completionType?: string;
     originalScheduledDate?: Date;
   }>) {
-    const key = utcDateKey(new Date(doc.date));
-    dateKeySet.add(key);
+    const d = new Date(doc.date);
+    const keyUtc = utcDateKey(d);
+    const keyTunisia = tunisiaDateKey(d);
+    dateKeySet.add(keyUtc);
+    dateKeySet.add(keyTunisia);
     const sid = doc.sessionId ? String(doc.sessionId) : '';
-    const arr = sessionsByDateKey.get(key) || [];
-    if (sid) arr.push(sid);
-    sessionsByDateKey.set(key, arr);
+    if (sid) {
+      for (const k of [keyUtc, keyTunisia]) {
+        const arr = sessionsByDateKey.get(k) || [];
+        if (!arr.includes(sid)) arr.push(sid);
+        sessionsByDateKey.set(k, arr);
+      }
+    }
     // Track which originally-scheduled dates have been rattrapaged
     if (doc.completionType === 'rattrapage' && doc.originalScheduledDate) {
-      completedOriginalDateKeys.add(utcDateKey(new Date(doc.originalScheduledDate)));
+      const orig = new Date(doc.originalScheduledDate);
+      const origUtc = utcDateKey(orig);
+      const origTunisia = tunisiaDateKey(orig);
+      completedOriginalDateKeys.add(origUtc);
+      completedOriginalDateKeys.add(origTunisia);
+      dateKeySet.add(origUtc);
+      dateKeySet.add(origTunisia);
+      if (sid) {
+        for (const k of [origUtc, origTunisia]) {
+          const arr = sessionsByDateKey.get(k) || [];
+          if (!arr.includes(sid)) arr.push(sid);
+          sessionsByDateKey.set(k, arr);
+        }
+      }
     }
   }
   return { dateKeySet, sessionsByDateKey, completedOriginalDateKeys };
@@ -318,7 +344,7 @@ router.get(
           const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, effectivePlanStart);
           if (diffDays >= 0 && weekIndex < assignmentDurationWeeks) {
             weekNumber = weekIndex + 1;
-            const templateDayKey = PLAN_DAY_KEYS[dayIndex];
+            const templateDayKey = getPlanDayKeyForDate(today);
             const week = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
             const placements = week?.days?.[templateDayKey] || [];
             const firstPlacement = placements[0];
@@ -487,9 +513,27 @@ router.get(
         const { dateKeySet, sessionsByDateKey, completedOriginalDateKeys } =
           await loadCompletedSessionsByDateKey(userId, lookbackStart, endOfDay);
         const todayKey = utcDateKey(today);
+        const todayTunisiaKey = tunisiaDateKey(today);
         if (todaySession?.sessionTemplateId) {
-          const todayDone = sessionsByDateKey.get(todayKey) || [];
-          completed = todayDone.includes(String(todaySession.sessionTemplateId));
+          const sid = String(todaySession.sessionTemplateId);
+          const todayDone = [
+            ...(sessionsByDateKey.get(todayKey) || []),
+            ...(sessionsByDateKey.get(todayTunisiaKey) || []),
+          ];
+          completed = todayDone.includes(sid);
+          if (!completed) {
+            const WorkoutSessionModel = require('../models/WorkoutSession.model').default;
+            const directDoc = await WorkoutSessionModel.findOne({
+              userId,
+              sessionId: todaySession.sessionTemplateId,
+              status: 'completed',
+              $or: [
+                { date: { $gte: today, $lte: endOfDay } },
+                { originalScheduledDate: { $gte: today, $lte: endOfDay } },
+              ],
+            }).lean();
+            if (directDoc) completed = true;
+          }
         }
 
         // Always search for a missed session regardless of today's session state
@@ -503,29 +547,43 @@ router.get(
             now: today,
           });
           if (missed) {
-            const stDoc = await SessionTemplate.findById(missed.sessionTemplateId)
-              .select('title durationMinutes difficulty items')
-              .lean();
-            if (stDoc) {
-              const items = (stDoc as any).items ?? [];
-              const missedData = {
-                sessionTemplateId: String((stDoc as any)._id),
-                title: (stDoc as any).title,
-                durationMinutes: (stDoc as any).durationMinutes,
-                difficulty: (stDoc as any).difficulty,
-                exerciseCount: Array.isArray(items) ? items.length : 0,
-                originalDate: missed.originalDate,
-                dayName: missed.dayName,
-                // additive
-                weekNumber: missed.weekNumber,
-                sessionOrder: missed.sessionOrder,
-                recommendedAt: missed.recommendedAt,
-                dueAt: missed.dueAt,
-              };
-              // missedSession = legacy field (kept for old clients)
-              missedSession = missedData;
-              // rattrapageSession = new field always present alongside sessionTemplate
-              rattrapageSession = missedData;
+            // Verify authoritative completion record: A completed session must NEVER appear as rattrapage
+            const WorkoutSessionModel = require('../models/WorkoutSession.model').default;
+            const isDone = await WorkoutSessionModel.findOne({
+              userId,
+              sessionId: missed.sessionTemplateId,
+              status: 'completed',
+              $or: [
+                { originalScheduledDate: new Date(missed.originalDate) },
+                { date: { $gte: new Date(missed.originalDate), $lte: new Date(`${missed.originalDate}T23:59:59.999Z`) } },
+              ],
+            }).lean();
+
+            if (!isDone) {
+              const stDoc = await SessionTemplate.findById(missed.sessionTemplateId)
+                .select('title durationMinutes difficulty items')
+                .lean();
+              if (stDoc) {
+                const items = (stDoc as any).items ?? [];
+                const missedData = {
+                  sessionTemplateId: String((stDoc as any)._id),
+                  title: (stDoc as any).title,
+                  durationMinutes: (stDoc as any).durationMinutes,
+                  difficulty: (stDoc as any).difficulty,
+                  exerciseCount: Array.isArray(items) ? items.length : 0,
+                  originalDate: missed.originalDate,
+                  dayName: missed.dayName,
+                  // additive
+                  weekNumber: missed.weekNumber,
+                  sessionOrder: missed.sessionOrder,
+                  recommendedAt: missed.recommendedAt,
+                  dueAt: missed.dueAt,
+                };
+                // missedSession = legacy field (kept for old clients)
+                missedSession = missedData;
+                // rattrapageSession = new field always present alongside sessionTemplate
+                rattrapageSession = missedData;
+              }
             }
           }
 
@@ -544,8 +602,7 @@ router.get(
         }
 
         if (todaySession?.sessionTemplateId && !completed) displayKind = 'NORMAL';
-        else if (!todaySession?.sessionTemplateId && rattrapageSession) displayKind = 'MAKEUP';
-        else if (todaySession?.sessionTemplateId && completed && rattrapageSession) displayKind = 'NORMAL';
+        else if (rattrapageSession) displayKind = 'MAKEUP';
         else displayKind = 'REST';
       } catch (err) {
         if (process.env.NODE_ENV !== 'production') {
@@ -1247,9 +1304,10 @@ router.get(
         ? 0
         : week?.minimumCompletedSessions ?? (level as any)?.minimumSessionsPerWeek ?? orderedSessions.length;
 
-      const weekStartDate = new Date(planStartMs + (weekNumber - 1) * 7 * MS_PER_DAY);
-      const weekEndDate = new Date(planStartMs + weekNumber * 7 * MS_PER_DAY - 1);
-      const { sessionsByDateKey: completedSessionsByDateKey } =
+      const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber);
+      const weekStartDate = weekStart;
+      const weekEndDate = new Date(weekEnd.getTime() - 1);
+      const { sessionsByDateKey: completedSessionsByDateKey, completedOriginalDateKeys } =
         await loadCompletedSessionsByDateKey(userId, weekStartDate, weekEndDate);
       const rattrapageDocs = await WorkoutSession.find({
         userId,
@@ -1265,7 +1323,10 @@ router.get(
           .filter((key): key is string => !!key)
       );
 
-      const todayUtcMs = utcStartOfCalendarDate(new Date());
+      const nowTunisiaKey = tunisiaDateKey(new Date());
+      const nowUtcKey = utcDateKey(new Date());
+      const currentWeekNumber = getCurrentWeekNumber(planStart, durationWeeks, new Date());
+      const weekDates = getProgramWeekDates(planStart, weekNumber);
 
       type DaySession = {
         sessionTemplateId: string;
@@ -1283,22 +1344,21 @@ router.get(
         status: 'completed' | 'pending' | 'missed' | 'rest' | 'rattrapage';
         sessions: DaySession[];
       }> = [];
-      for (let i = 0; i < 7; i++) {
-        const offsetDays = (weekNumber - 1) * 7 + i;
-        const dayStart = new Date(planStartMs + offsetDays * MS_PER_DAY);
-        const y = dayStart.getUTCFullYear();
-        const mo = dayStart.getUTCMonth();
-        const d = dayStart.getUTCDate();
-        const dayEnd = new Date(Date.UTC(y, mo, d, 23, 59, 59, 999));
-        const dateKeyStr = dateToKeyUtc(dayStart);
-        const dayUtcMs = utcStartOfCalendarDate(dayStart);
-        const isPast = dayUtcMs < todayUtcMs;
-        const isFuture = dayUtcMs > todayUtcMs;
-        const completedIdsForDay = completedSessionsByDateKey.get(dateKeyStr) || [];
+
+      for (const dayStart of weekDates) {
+        const dayKey = getPlanDayKeyForDate(dayStart);
+        const dateKeyStr = utcDateKey(dayStart);
+        const dateTunisiaKeyStr = tunisiaDateKey(dayStart);
+        const isPast = dateKeyStr < nowUtcKey && dateTunisiaKeyStr < nowTunisiaKey;
+        const isFuture = dateKeyStr > nowUtcKey && dateTunisiaKeyStr > nowTunisiaKey;
+        const completedIdsForDay = [
+          ...(completedSessionsByDateKey.get(dateKeyStr) || []),
+          ...(completedSessionsByDateKey.get(dateTunisiaKeyStr) || []),
+        ];
 
         let sessionsForDay: Array<{ sessionTemplateId: string; title?: string; durationMinutes?: number }> = [];
         if (week) {
-          const placements = (week.days as any)?.[dayKeys[i]] || [];
+          const placements = (week.days as any)?.[dayKey] || [];
           sessionsForDay = placements
             .map((p: any) => {
               const id = p.sessionTemplateId != null ? String(p.sessionTemplateId) : null;
@@ -1313,6 +1373,10 @@ router.get(
         }
         // Stale DailyProgram rows must not override assignment-level templates.
         if (sessionsForDay.length === 0 && !hasLevelTemplatePlan) {
+          const y = dayStart.getUTCFullYear();
+          const mo = dayStart.getUTCMonth();
+          const d = dayStart.getUTCDate();
+          const dayEnd = new Date(Date.UTC(y, mo, d, 23, 59, 59, 999));
           const dailyProgram = await DailyProgram.findOne({
             userId,
             date: { $gte: dayStart, $lte: dayEnd },
@@ -1336,19 +1400,30 @@ router.get(
         const sessionsWithStatus: DaySession[] = sessionsForDay.map((s) => {
           const id = String(s.sessionTemplateId);
           const isCompleted = completedIdsForDay.includes(id);
-          const isRattrapage = rattrapageDateKeys.has(dateKeyStr);
+          const isRattrapageOrig =
+            rattrapageDateKeys.has(dateKeyStr) ||
+            completedOriginalDateKeys.has(dateKeyStr) ||
+            completedOriginalDateKeys.has(dateTunisiaKeyStr);
           let status: DaySession['status'];
-          if (isCompleted) status = 'completed';
-          else if (isRattrapage) status = 'rattrapage';
-          else if (isPast) status = 'missed';
-          else status = 'pending'; // today or future
+          if (isCompleted || isRattrapageOrig) {
+            status = 'completed';
+          } else if (isPast) {
+            // Rattrapage is ONLY valid during the SAME week (Requirement 4)
+            if (weekNumber === currentWeekNumber) {
+              status = 'rattrapage';
+            } else {
+              status = 'missed';
+            }
+          } else {
+            status = 'pending'; // today or future
+          }
           const orderMeta = orderMetaByTemplateId.get(id);
           return {
             ...s,
             sessionTemplateId: id,
             status,
             sessionOrder: orderMeta?.sessionOrder,
-            recommendedDayOffset: orderMeta?.recommendedDayOffset ?? i,
+            recommendedDayOffset: orderMeta?.recommendedDayOffset,
           };
         });
 
@@ -1361,14 +1436,12 @@ router.get(
           dayStatus = 'rattrapage';
         } else if (sessionsWithStatus.some((s) => s.status === 'missed')) {
           dayStatus = 'missed';
-        } else if (isFuture || dayUtcMs === todayUtcMs) {
-          dayStatus = 'pending';
         } else {
           dayStatus = 'pending';
         }
 
         days.push({
-          day: dayKeys[i],
+          day: dayKey,
           date: dayStart.toISOString().split('T')[0],
           dateKey: dateKeyStr,
           status: dayStatus,
@@ -1786,19 +1859,76 @@ router.post(
       const ExerciseHistoryModel = require('../models/ExerciseHistory.model').default;
       const mongoose = require('mongoose');
 
-      const session = await WorkoutSessionModel.create({
+      // Check for existing completed session to ensure idempotency (Requirement 1)
+      const existingCompleted = await WorkoutSessionModel.findOne({
         userId,
         sessionId: new mongoose.Types.ObjectId(sessionTemplateId),
-        date: new Date(),
-        exercises: exercisesWithVolume,
-        startedAt: new Date(Date.now() - durationSeconds * 1000),
-        completedAt: new Date(),
-        durationSeconds,
-        totalSessionVolumeKg,
         status: 'completed',
-        completionType,
-        originalScheduledDate: originalScheduledDate ? new Date(originalScheduledDate) : undefined,
+        $or: [
+          { date: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
+          ...(originalScheduledDate ? [{ originalScheduledDate: new Date(originalScheduledDate) }] : []),
+        ],
       });
+
+      if (existingCompleted) {
+        // Idempotent: close any dangling active session and return existing record without duplicating
+        await WorkoutSessionModel.updateMany(
+          {
+            userId,
+            sessionId: new mongoose.Types.ObjectId(sessionTemplateId),
+            status: 'active',
+          },
+          { $set: { status: 'completed', completedAt: existingCompleted.completedAt || new Date() } }
+        );
+        return res.json({ success: true, sessionId: existingCompleted._id, alreadyCompleted: true });
+      }
+
+      // Check if there is an active session in progress to complete instead of creating duplicate
+      const activeSession = await WorkoutSessionModel.findOne({
+        userId,
+        sessionId: new mongoose.Types.ObjectId(sessionTemplateId),
+        status: 'active',
+      }).sort({ startedAt: -1 });
+
+      let session;
+      if (activeSession) {
+        activeSession.status = 'completed';
+        activeSession.completedAt = new Date();
+        activeSession.durationSeconds = durationSeconds;
+        activeSession.totalSessionVolumeKg = totalSessionVolumeKg;
+        activeSession.exercises = exercisesWithVolume;
+        activeSession.completionType = completionType;
+        if (originalScheduledDate) {
+          activeSession.originalScheduledDate = new Date(originalScheduledDate);
+        }
+        await activeSession.save();
+        session = activeSession;
+      } else {
+        session = await WorkoutSessionModel.create({
+          userId,
+          sessionId: new mongoose.Types.ObjectId(sessionTemplateId),
+          date: new Date(),
+          exercises: exercisesWithVolume,
+          startedAt: new Date(Date.now() - durationSeconds * 1000),
+          completedAt: new Date(),
+          durationSeconds,
+          totalSessionVolumeKg,
+          status: 'completed',
+          completionType,
+          originalScheduledDate: originalScheduledDate ? new Date(originalScheduledDate) : undefined,
+        });
+      }
+
+      // Clean up any other dangling active sessions for this user and session
+      await WorkoutSessionModel.updateMany(
+        {
+          userId,
+          _id: { $ne: session._id },
+          sessionId: new mongoose.Types.ObjectId(sessionTemplateId),
+          status: 'active',
+        },
+        { $set: { status: 'completed', completedAt: new Date() } }
+      );
 
       // Upsert ExerciseHistory for each exercise
       for (const ex of exercisesWithVolume) {

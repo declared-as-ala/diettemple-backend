@@ -4,7 +4,7 @@ export interface ILead extends Document {
   name: string;
   email: string;
   phone: string;
-  goal: string;
+  goal?: string;
   plan?: string;
   gender?: string;
   status: 'new' | 'contacted' | 'converted' | 'lost';
@@ -19,7 +19,7 @@ const LeadSchema: Schema = new Schema(
     name:  { type: String, required: true, trim: true },
     email: { type: String, required: true, trim: true, lowercase: true },
     phone: { type: String, required: true, trim: true },
-    goal:  { type: String, default: 'fat-loss', trim: true },
+    goal:  { type: String, default: '', trim: true },
     plan:  { type: String, default: 'ascension', trim: true },
     status: {
       type: String,
