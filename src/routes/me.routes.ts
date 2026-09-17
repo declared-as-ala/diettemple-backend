@@ -1157,6 +1157,7 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
       : (planAssignment as any)?.levelTemplateId;
     const level = levelId ? await LevelTemplate.findById(levelId).lean() : null;
     const week = (level as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
+    const orderedSessions = resolveWeekSessions(week);
 
     // Completed workouts in the week window (checked across UTC and Tunisia keys + rattrapages)
     const { sessionsByDateKey: completedSessionsByDateKey, completedOriginalDateKeys } =
@@ -1179,30 +1180,64 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     const todayTunisiaKey = tunisiaDateKey(new Date());
     const FR_DAY_ABBR = ['DIM', 'LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM'];
 
-    const days = [];
+    const rawDays = [];
     for (const dayDate of weekDates) {
       const dayKey = getPlanDayKeyForDate(dayDate);
       const dateKey = utcDateKey(dayDate);
       const dateTunisiaKey = tunisiaDateKey(dayDate);
+      const dow = dayDate.getUTCDay();
+      const dayOffset = dow === 0 ? 6 : dow - 1; // 0 = Mon, ..., 6 = Sun
 
-      const sessionsForDay = (week?.days as any)?.[dayKey] || [];
-      const hasScheduledWorkout = sessionsForDay.length > 0;
-      const isRestDay = !hasScheduledWorkout;
+      const placements = (week?.days as any)?.[dayKey] || [];
+      const hasOrdered = orderedSessions.some((s) => s.recommendedDayOffset === dayOffset);
+      const hasScheduledWorkout = placements.length > 0 || hasOrdered;
 
-      const isCompleted = hasScheduledWorkout && (
-        completedSessionsByDateKey.has(dateKey) ||
-        completedSessionsByDateKey.has(dateTunisiaKey) ||
-        completedOriginalDateKeys.has(dateKey) ||
-        completedOriginalDateKeys.has(dateTunisiaKey)
+      rawDays.push({
+        dayDate,
+        dayKey,
+        dateKey,
+        dateTunisiaKey,
+        dow,
+        label: FR_DAY_ABBR[dow],
+        hasScheduledWorkout,
+      });
+    }
+
+    // If orderedSessions has more sessions than were matched by weekday offsets
+    // (e.g. in a partial week of 3 days where 2 sessions are planned),
+    // allocate remaining planned sessions onto available days so they are not dropped.
+    let scheduledWorkoutDaysCount = rawDays.filter((d) => d.hasScheduledWorkout).length;
+    if (orderedSessions.length > scheduledWorkoutDaysCount) {
+      for (const day of rawDays) {
+        if (!day.hasScheduledWorkout && scheduledWorkoutDaysCount < orderedSessions.length) {
+          day.hasScheduledWorkout = true;
+          scheduledWorkoutDaysCount++;
+        }
+      }
+    }
+
+    const targetWorkoutSessions = Math.max(
+      scheduledWorkoutDaysCount,
+      orderedSessions.length,
+      week?.minimumCompletedSessions ?? 0
+    ) || 4;
+
+    const days = rawDays.map((d) => {
+      const isRestDay = !d.hasScheduledWorkout;
+      const isCompleted = d.hasScheduledWorkout && (
+        completedSessionsByDateKey.has(d.dateKey) ||
+        completedSessionsByDateKey.has(d.dateTunisiaKey) ||
+        completedOriginalDateKeys.has(d.dateKey) ||
+        completedOriginalDateKeys.has(d.dateTunisiaKey)
       );
 
-      const nutritionGoalCompleted = nutritionDateKeys.has(dateKey) || nutritionDateKeys.has(dateTunisiaKey);
+      const nutritionGoalCompleted = nutritionDateKeys.has(d.dateKey) || nutritionDateKeys.has(d.dateTunisiaKey);
       const isValidated = isRestDay
         ? nutritionGoalCompleted
         : (isCompleted && nutritionGoalCompleted);
 
-      const isToday = dateKey === todayUtcKey || dateKey === todayTunisiaKey || dateTunisiaKey === todayTunisiaKey;
-      const isPast = (dateKey < todayUtcKey && dateTunisiaKey < todayTunisiaKey);
+      const isToday = d.dateKey === todayUtcKey || d.dateKey === todayTunisiaKey || d.dateTunisiaKey === todayTunisiaKey;
+      const isPast = (d.dateKey < todayUtcKey && d.dateTunisiaKey < todayTunisiaKey);
 
       let dayStatus: 'completed' | 'pending' | 'missed' | 'rest' | 'rattrapage' = 'pending';
       if (isRestDay) {
@@ -1219,26 +1254,18 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
         dayStatus = 'pending';
       }
 
-      const dow = dayDate.getUTCDay();
-      const label = FR_DAY_ABBR[dow];
-
-      days.push({
-        date: dateKey,
-        label,
+      return {
+        date: d.dateKey,
+        label: d.label,
         workoutCompleted: isCompleted,
         nutritionGoalCompleted,
-        hasScheduledWorkout,
+        hasScheduledWorkout: d.hasScheduledWorkout,
         isRestDay,
         isValidated,
         isToday,
         status: dayStatus,
-      });
-    }
-
-    const scheduledWorkoutDaysCount = days.filter((d) => d.hasScheduledWorkout).length;
-    const targetWorkoutSessions = scheduledWorkoutDaysCount > 0
-      ? scheduledWorkoutDaysCount
-      : (week?.minimumCompletedSessions ?? 4);
+      };
+    });
 
     const completedWorkoutsCount = days.filter((d) => d.workoutCompleted).length;
     const validatedDaysCount = days.filter((d) => d.isValidated).length;
