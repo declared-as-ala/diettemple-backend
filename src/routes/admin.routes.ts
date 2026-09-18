@@ -65,8 +65,21 @@ router.use('/landing-videos', landingVideoRoutes);
 // requireAdmin will check the role
 
 // ── MinIO upload helpers (replaces all multer.diskStorage) ───────────────────
-import { videoUpload, uploadToMinio, deleteFromMinio, buildFilename } from '../lib/minioUpload';
+import { videoUpload, imageUpload, uploadToMinio, deleteFromMinio, buildFilename } from '../lib/minioUpload';
 import { BUCKETS } from '../lib/minioClient';
+import StockMovement from '../models/StockMovement.model';
+import {
+  adjustProductStock,
+  handleOrderStockDeduction,
+  handleOrderStockRestoration,
+  recordStockMovement,
+} from '../services/stock.service';
+import {
+  processAndUploadProductImage,
+  importExternalImageToMinio,
+  deleteProductImageFromMinio,
+} from '../services/productImage.service';
+import { generateUniqueProductSlug } from '../utils/slug.utils';
 const upload = videoUpload;                  // exercise video upload
 const levelHomeVideoUpload = videoUpload;    // level-home video upload
 
@@ -254,7 +267,165 @@ router.get(
       if (!product) {
         return res.status(404).json({ message: 'Product not found' });
       }
+
+      // Backward compatibility: synthesize mediaImages from legacy images array if empty
+      const productObj: any = { ...product };
+      if ((!productObj.mediaImages || productObj.mediaImages.length === 0) && Array.isArray(productObj.images) && productObj.images.length > 0) {
+        productObj.mediaImages = productObj.images.map((imgUrl: string, idx: number) => ({
+          key: imgUrl.startsWith('/media/') ? imgUrl.replace(/^\/media\//, '') : '',
+          bucket: 'media',
+          url: imgUrl,
+          isPrimary: idx === 0,
+          order: idx,
+          alt: productObj.name || '',
+        }));
+      }
+
+      res.json({ product: productObj });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// POST /admin/products/upload-image - Upload product images to MinIO with WebP optimization
+router.post(
+  '/products/upload-image',
+  imageUpload.array('images', 10),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const files = (req.files as Express.Multer.File[]) || [];
+      if (!files.length && req.file) {
+        files.push(req.file);
+      }
+      if (!files.length) {
+        return res.status(400).json({ message: 'Aucun fichier d’image fourni' });
+      }
+
+      const productId = typeof req.body.productId === 'string' ? req.body.productId : undefined;
+      const alt = typeof req.body.alt === 'string' ? req.body.alt : undefined;
+
+      const uploadedImages = [];
+      for (const file of files) {
+        const mediaImg = await processAndUploadProductImage(file, productId, alt);
+        uploadedImages.push(mediaImg);
+      }
+
+      res.json({
+        images: uploadedImages,
+        image: uploadedImages[0],
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || 'Erreur lors du téléchargement de l’image' });
+    }
+  }
+);
+
+// POST /admin/products/:id/import-image - Import external image URL to MinIO
+router.post(
+  '/products/:id/import-image',
+  [
+    param('id').isMongoId(),
+    body('imageUrl').isString().notEmpty().withMessage('URL d’image requise'),
+    body('alt').optional().isString(),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const product = await Product.findById(req.params.id);
+      if (!product) {
+        return res.status(404).json({ message: 'Produit introuvable' });
+      }
+
+      const { imageUrl, alt } = req.body;
+      const mediaImg = await importExternalImageToMinio(imageUrl, String(product._id), alt || product.name);
+
+      if (!Array.isArray(product.mediaImages)) {
+        product.mediaImages = [];
+      }
+      mediaImg.order = product.mediaImages.length;
+      if (product.mediaImages.length === 0) {
+        mediaImg.isPrimary = true;
+      }
+      product.mediaImages.push(mediaImg);
+
+      // In legacy images array, replace external url if found
+      if (Array.isArray(product.images)) {
+        const idx = product.images.indexOf(imageUrl);
+        if (idx !== -1) {
+          product.images[idx] = mediaImg.url || `/${mediaImg.bucket}/${mediaImg.key}`;
+        }
+      }
+
+      await product.save();
+
+      res.json({ image: mediaImg, product });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || 'Erreur lors de l’importation de l’image' });
+    }
+  }
+);
+
+// DELETE /admin/products/:id/images - Delete image from MinIO and product
+router.delete(
+  '/products/:id/images',
+  [param('id').isMongoId(), body('key').isString().notEmpty()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const product = await Product.findById(req.params.id);
+      if (!product) {
+        return res.status(404).json({ message: 'Produit introuvable' });
+      }
+
+      const { key } = req.body;
+      await deleteProductImageFromMinio(key);
+
+      product.mediaImages = (product.mediaImages || []).filter((img) => img.key !== key);
+      if (product.mediaImages.length > 0 && !product.mediaImages.some((img) => img.isPrimary)) {
+        product.mediaImages[0].isPrimary = true;
+      }
+
+      await product.save();
       res.json({ product });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// GET /admin/products/:id/stock-history - Get stock movements history
+router.get(
+  '/products/:id/stock-history',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const movements = await StockMovement.find({ productId: req.params.id })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .populate('performedBy', 'name email role')
+        .populate('orderId', 'reference status')
+        .lean();
+
+      res.json({ movements });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// POST /admin/products/:id/adjust-stock - Adjust stock quantity with reason
+router.post(
+  '/products/:id/adjust-stock',
+  [param('id').isMongoId(), body('quantity').isInt({ min: 0 })],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { product, movement } = await adjustProductStock({
+        productId: req.params.id,
+        newQuantity: req.body.quantity,
+        reason: req.body.reason || 'Ajustement manuel',
+        performedBy: req.user?._id,
+      });
+
+      res.json({ product, movement });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -270,7 +441,7 @@ router.post(
     body('category').notEmpty().withMessage('Category is required'),
     body('description').notEmpty().withMessage('Description is required'),
     body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
-    body('stock').isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
+    body('stock').optional().isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
     body('weight').notEmpty().withMessage('Weight is required'),
     body('uhPrice').optional({ nullable: true }).isFloat({ min: 0 }).withMessage('UH price must be positive'),
     body('isUhExclusive').optional().isBoolean(),
@@ -279,7 +450,8 @@ router.post(
     try {
       const {
         name, brand, category, description, composition, flavors, weight,
-        price, discount, stock, images, isFeatured, tags, nutritionFacts,
+        price, discount, stock, images, mediaImages, sku, trackStock,
+        lowStockThreshold, seo, isFeatured, tags, nutritionFacts,
         uhPrice, isUhExclusive,
       } = req.body;
 
@@ -287,6 +459,13 @@ router.post(
       if (uhPrice != null && uhPrice > price) {
         return res.status(400).json({ message: 'Le prix UH doit être inférieur ou égal au prix normal' });
       }
+
+      // Generate unique SEO slug
+      const seoData = seo ? { ...seo } : {};
+      const targetSlug = seoData.slug || seoData.title || name;
+      seoData.slug = await generateUniqueProductSlug(targetSlug);
+
+      const parsedStock = parseInt(stock) || 0;
 
       const product = new Product({
         name, brand, category, description,
@@ -296,14 +475,33 @@ router.post(
         discount: discount || 0,
         uhPrice: uhPrice ?? null,
         isUhExclusive: isUhExclusive || false,
-        stock: stock || 0,
-        images: images || [],
+        stock: parsedStock,
+        sku: sku ? String(sku).trim().toUpperCase() : undefined,
+        trackStock: trackStock !== false,
+        lowStockThreshold: typeof lowStockThreshold === 'number' ? lowStockThreshold : 5,
+        mediaImages: Array.isArray(mediaImages) ? mediaImages : [],
+        images: Array.isArray(images) ? images : [],
+        seo: seoData,
         isFeatured: isFeatured || false,
         tags: tags || [],
         ...(nutritionFacts && { composition: { ...composition, ...nutritionFacts } }),
       });
 
       await product.save();
+
+      // Record initial stock movement if initial stock > 0
+      if (parsedStock > 0) {
+        await recordStockMovement({
+          productId: product._id,
+          type: 'adjustment',
+          previousQuantity: 0,
+          quantityChange: parsedStock,
+          newQuantity: parsedStock,
+          reason: 'Stock initial',
+          performedBy: req.user?._id,
+        });
+      }
+
       res.status(201).json({ product });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -338,6 +536,36 @@ router.put(
       // Allow explicitly setting uhPrice to null to remove it
       if ('uhPrice' in updates && (updates.uhPrice === null || updates.uhPrice === '')) {
         updates.uhPrice = null;
+      }
+
+      // Handle stock movement if stock changed
+      if (updates.stock !== undefined) {
+        const newStock = parseInt(updates.stock) || 0;
+        const previousStock = product.stock || 0;
+        if (newStock !== previousStock) {
+          await recordStockMovement({
+            productId: product._id,
+            type: 'adjustment',
+            previousQuantity: previousStock,
+            quantityChange: newStock - previousStock,
+            newQuantity: newStock,
+            reason: updates.stockReason || 'Ajustement manuel',
+            performedBy: req.user?._id,
+          });
+          updates.stock = newStock;
+        }
+      }
+
+      // Handle unique slug if updated
+      if (updates.seo?.slug && updates.seo.slug !== product.seo?.slug) {
+        updates.seo.slug = await generateUniqueProductSlug(updates.seo.slug, String(product._id));
+      } else if (!product.seo?.slug && (updates.name || product.name)) {
+        if (!updates.seo) updates.seo = product.seo ? (product.seo as any).toObject?.() || { ...product.seo } : {};
+        updates.seo.slug = await generateUniqueProductSlug(updates.seo.title || updates.name || product.name, String(product._id));
+      }
+
+      if (updates.sku !== undefined) {
+        updates.sku = updates.sku ? String(updates.sku).trim().toUpperCase() : undefined;
       }
 
       Object.assign(product, updates);
@@ -495,6 +723,7 @@ router.put(
         return res.status(404).json({ message: 'Order not found' });
       }
 
+      const previousStatus = order.status;
       order.status = req.body.status;
       
       // Auto-update payment status when order is delivered
@@ -503,6 +732,16 @@ router.put(
       }
 
       await order.save();
+
+      // Idempotent stock lifecycle handling
+      if (req.body.status === 'cancelled' && previousStatus !== 'cancelled') {
+        await handleOrderStockRestoration(order, 'Annulation de commande par l’administration', req.user?._id);
+      } else if (
+        (req.body.status === 'confirmed' || req.body.status === 'paid') &&
+        previousStatus === 'cancelled'
+      ) {
+        await handleOrderStockDeduction(order);
+      }
 
       res.json({ order });
     } catch (error: any) {

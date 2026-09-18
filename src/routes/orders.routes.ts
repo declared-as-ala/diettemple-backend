@@ -8,6 +8,7 @@ import Product from '../models/Product.model';
 import Subscription from '../models/Subscription.model';
 import PromoCode from '../models/PromoCode.model';
 import { calculateDeliveryFee } from '../utils/delivery.utils';
+import { handleOrderStockDeduction } from '../services/stock.service';
 
 /** Returns true if a userId has an ACTIVE subscription that hasn't expired yet */
 async function isUhSubscribed(userId: string | null): Promise<boolean> {
@@ -206,6 +207,11 @@ router.post(
       if (promoResult.promoId) {
         await PromoCode.updateOne({ _id: promoResult.promoId }, { $inc: { usedCount: 1 } });
       }
+
+      // Record stock movements for order items
+      void handleOrderStockDeduction(order).catch((err) => {
+        console.error('Error recording order stock deduction:', err);
+      });
 
       // If user is authenticated, clear their cart
       if (userId) {
