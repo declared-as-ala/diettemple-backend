@@ -40,13 +40,22 @@ const getJWTSecret = (): string => {
 
 const JWT_EXPIRES_IN: string = process.env.JWT_EXPIRES_IN || '7d';
 
-export const generateToken = (userId: string, tokenVersion = 0): string => {
+export const generateToken = (
+  userId: string,
+  tokenVersion = 0,
+  role?: string,
+  name?: string
+): string => {
   // Get JWT_SECRET at runtime (after dotenv.config() has run)
   const JWT_SECRET = getJWTSecret();
-  
+
+  const payload: any = { userId, tokenVersion };
+  if (role) payload.role = role;
+  if (name) payload.name = name;
+
   // Use process.env.JWT_SECRET directly - NO fallback, NO hardcoded values
   const token = jwt.sign(
-    { userId, tokenVersion },
+    payload,
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions
   );
@@ -100,7 +109,12 @@ export const authService = {
       throw new Error('Invalid credentials');
     }
 
-    const token = generateToken(user._id.toString(), user.tokenVersion || 0);
+    const token = generateToken(
+      user._id.toString(),
+      user.tokenVersion || 0,
+      user.role,
+      user.name
+    );
 
     return {
       user: sanitizeUser(user),
@@ -244,7 +258,12 @@ export const authService = {
     }
 
     // Generate new JWT token
-    const token = generateToken(user._id.toString(), user.tokenVersion || 0);
+    const token = generateToken(
+      user._id.toString(),
+      user.tokenVersion || 0,
+      user.role,
+      user.name
+    );
 
     return {
       user: sanitizeUser(user),
