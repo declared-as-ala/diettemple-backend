@@ -73,8 +73,8 @@ router.get(
       if (!populatedSession && dailyProgramObj.sessionTemplateId) {
         sessionIdString = dailyProgramObj.sessionTemplateId.toString();
         const template = await SessionTemplate.findById(dailyProgramObj.sessionTemplateId)
-          .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath imageUrl')
-          .populate('items.alternatives', 'name muscleGroup equipment videoUrl imageUrl')
+          .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath imageUrl instruction message warmupInstruction')
+          .populate('items.alternatives', 'name muscleGroup equipment videoUrl imageUrl instruction message warmupInstruction')
           .lean();
         if (template) {
           const t = template as any;
@@ -85,11 +85,39 @@ router.get(
             description: t.description,
             difficulty: t.difficulty,
             durationMinutes: t.durationMinutes,
+            warmup: t.warmup,
+            warmupInstruction: t.warmup?.notes || t.warmupInstruction,
             exercises: items.map((item: any) => {
               const ex = item.exerciseId?.toObject ? item.exerciseId.toObject() : item.exerciseId || {};
-              return { _id: ex._id, name: ex.name, muscleGroup: ex.muscleGroup, equipment: ex.equipment, difficulty: ex.difficulty, description: ex.description, videoUrl: ex.videoUrl, imageUrl: ex.imageUrl, sets: item.sets, targetReps: item.targetReps, alternatives: item.alternatives || [] };
+              return {
+                _id: ex._id,
+                name: ex.name,
+                muscleGroup: ex.muscleGroup,
+                equipment: ex.equipment,
+                difficulty: ex.difficulty,
+                description: ex.description,
+                videoUrl: ex.videoUrl,
+                imageUrl: ex.imageUrl,
+                sets: item.sets,
+                targetReps: item.targetReps,
+                instruction: item.instruction || ex.instruction,
+                message: item.message || ex.message,
+                warmupInstruction: item.warmupInstruction || ex.warmupInstruction,
+                notes: item.notes,
+                alternatives: item.alternatives || [],
+              };
             }),
-            exerciseConfigs: items.map((item: any) => ({ sets: item.sets, targetReps: item.targetReps, order: item.order, exerciseId: item.exerciseId, alternatives: item.alternatives || [] })),
+            exerciseConfigs: items.map((item: any) => ({
+              sets: item.sets,
+              targetReps: item.targetReps,
+              order: item.order,
+              instruction: item.instruction || item.exerciseId?.instruction,
+              message: item.message || item.exerciseId?.message,
+              warmupInstruction: item.warmupInstruction || item.exerciseId?.warmupInstruction,
+              notes: item.notes,
+              exerciseId: item.exerciseId,
+              alternatives: item.alternatives || [],
+            })),
           };
         }
       }
@@ -161,8 +189,8 @@ router.get(
 
       // 2) Try SessionTemplate (what /me/today returns as sessionTemplateId)
       const template = await SessionTemplate.findById(sessionId)
-        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath imageUrl')
-        .populate('items.alternatives', 'name muscleGroup equipment videoUrl imageUrl')
+        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath imageUrl instruction message warmupInstruction')
+        .populate('items.alternatives', 'name muscleGroup equipment videoUrl imageUrl instruction message warmupInstruction')
         .lean();
 
       if (!template) {
@@ -184,6 +212,10 @@ router.get(
           imageUrl: ex.imageUrl,
           sets: item.sets,
           targetReps: item.targetReps,
+          instruction: item.instruction || ex.instruction,
+          message: item.message || ex.message,
+          warmupInstruction: item.warmupInstruction || ex.warmupInstruction,
+          notes: item.notes,
           alternatives: item.alternatives || [],
         };
       });
@@ -194,6 +226,8 @@ router.get(
         description: templateObj.description,
         difficulty: templateObj.difficulty,
         duration: templateObj.durationMinutes ?? undefined,
+        warmup: templateObj.warmup,
+        warmupInstruction: templateObj.warmup?.notes || templateObj.warmupInstruction,
         exercises,
         exerciseConfigs: items.map((item: any) => ({
           _id: item._id,
@@ -201,6 +235,10 @@ router.get(
           targetReps: item.targetReps,
           recommendedStartingWeight: item.recommendedStartingWeightKg,
           order: item.order,
+          instruction: item.instruction || item.exerciseId?.instruction,
+          message: item.message || item.exerciseId?.message,
+          warmupInstruction: item.warmupInstruction || item.exerciseId?.warmupInstruction,
+          notes: item.notes,
           progressionRules: item.progressionRules,
           exerciseId: item.exerciseId?.toObject ? item.exerciseId.toObject() : item.exerciseId,
           alternatives: item.alternatives || [],

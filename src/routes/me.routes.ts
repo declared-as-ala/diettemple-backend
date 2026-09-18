@@ -1715,8 +1715,8 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const session = await SessionTemplate.findById(req.params.sessionTemplateId)
-        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath')
-        .populate('items.alternatives', 'name muscleGroup equipment videoUrl')
+        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath instruction message warmupInstruction')
+        .populate('items.alternatives', 'name muscleGroup equipment videoUrl instruction message warmupInstruction')
         .lean();
       if (!session) return res.status(404).json({ message: 'Session not found' });
       res.json({ session });
@@ -1820,11 +1820,14 @@ router.post(
 
       const lastSet = normalizedSets[normalizedSets.length - 1];
       const totalVolume = normalizedSets.reduce((sum, s) => sum + s.reps * s.weight, 0);
-      const maxIncomingWeight = normalizedSets.reduce((max, s) => Math.max(max, s.weight), 0);
+
+      // PR is valid ONLY when reps are between 5 and 8 (1-4 reps do not qualify)
+      const prQualifyingSets = normalizedSets.filter((s) => s.reps >= 5 && s.reps <= 8 && Number.isFinite(s.weight));
+      const maxQualifyingIncomingWeight = prQualifyingSets.reduce((max, s) => Math.max(max, s.weight), 0);
 
       const existingHistory = await ExerciseHistory.findOne({ userId, exerciseId }).lean();
       const currentPr = Number(existingHistory?.personalRecord ?? 0);
-      const personalRecord = Math.max(currentPr, maxIncomingWeight);
+      const personalRecord = Math.max(currentPr, maxQualifyingIncomingWeight);
 
       const history = await ExerciseHistory.findOneAndUpdate(
         { userId, exerciseId },
@@ -1994,7 +1997,12 @@ router.post(
       for (const ex of exercisesWithVolume) {
         if (!ex.exerciseId) continue;
         const lastSet = ex.sets[ex.sets.length - 1];
-        const maxExWeight = ex.sets.reduce((max, s) => Math.max(max, Number(s.weight ?? 0)), 0);
+        // PR is valid ONLY when reps are between 5 and 8
+        const prQualifyingSets = ex.sets.filter((s: any) => {
+          const reps = Number(s.repsCompleted ?? s.reps ?? 0);
+          return reps >= 5 && reps <= 8;
+        });
+        const maxExWeight = prQualifyingSets.reduce((max: number, s: any) => Math.max(max, Number(s.weight ?? 0)), 0);
         const existingHist = await ExerciseHistoryModel.findOne({ userId, exerciseId: ex.exerciseId }).lean();
         const personalRecord = Math.max(Number(existingHist?.personalRecord ?? 0), maxExWeight);
 

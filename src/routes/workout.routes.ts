@@ -293,14 +293,21 @@ router.post(
           exerciseId: exerciseIdStr,
         });
 
-        const maxCompletedWeight = Math.max(0, ...weights);
+        // PR is valid ONLY when reps are between 5 and 8 (1-4 reps do not qualify)
+        const prQualifyingSets = completedSets.filter((s) => {
+          const r = Number(s.repsCompleted ?? 0);
+          return r >= 5 && r <= 8 && Number(s.weight ?? 0) > 0;
+        });
+        const maxQualifyingWeight = prQualifyingSets.length > 0
+          ? Math.max(...prQualifyingSets.map((s) => Number(s.weight ?? 0)))
+          : 0;
 
         if (!history) {
           history = await ExerciseHistory.create({
             userId: req.user._id,
             exerciseId: exerciseIdStr,
             lastWeight: lastWeight,
-            personalRecord: maxCompletedWeight,
+            personalRecord: maxQualifyingWeight,
             lastReps: reps,
             lastSets: completedSets.map((s, idx) => ({
               setNumber: idx + 1,
@@ -316,7 +323,9 @@ router.post(
         } else {
           // Update history
           history.lastWeight = lastWeight;
-          history.personalRecord = Math.max(Number(history.personalRecord ?? 0), maxCompletedWeight);
+          if (maxQualifyingWeight > 0) {
+            history.personalRecord = Math.max(Number(history.personalRecord ?? 0), maxQualifyingWeight);
+          }
           history.lastReps = reps;
           history.lastSets = completedSets.map((s, idx) => ({
             setNumber: idx + 1,
@@ -435,6 +444,15 @@ router.get(
 
       if (!workoutSession) {
         return res.status(404).json({ message: 'No active workout session' });
+      }
+
+      // Active workout resume must expire after 20 hours
+      const TWENTY_HOURS_MS = 20 * 60 * 60 * 1000;
+      const lastActive = workoutSession.updatedAt || workoutSession.startedAt || (workoutSession as any).createdAt;
+      if (lastActive && Date.now() - new Date(lastActive).getTime() > TWENTY_HOURS_MS) {
+        workoutSession.status = 'abandoned';
+        await workoutSession.save();
+        return res.status(404).json({ message: 'Active workout session has expired (exceeded 20 hours)' });
       }
 
       res.json({ workoutSession });

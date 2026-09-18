@@ -33,6 +33,9 @@ const SessionTemplateItemSchema = new Schema(
     targetReps: { type: Schema.Types.Mixed, required: true },
     recommendedStartingWeightKg: { type: Number },
     progressionRules: [ProgressionRuleSchema],
+    instruction: { type: String, trim: true },
+    message: { type: String, trim: true },
+    notes: { type: String, trim: true },
     order: { type: Number, default: 0 },
   },
   { _id: true }
@@ -78,6 +81,9 @@ export interface ISessionTemplateItem {
     weightChange?: number;
     message?: string;
   }>;
+  instruction?: string;
+  message?: string;
+  notes?: string;
   order: number;
 }
 

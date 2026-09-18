@@ -198,9 +198,20 @@ router.put(
       if (photoUri !== undefined) updateData.photoUri = photoUri;
       if (age !== undefined) updateData.age = age;
       if (sexe !== undefined) updateData.sexe = sexe;
-      if (poids !== undefined) updateData.poids = poids;
-      if (taille !== undefined) updateData.taille = taille;
       if (objectif !== undefined) updateData.objectif = objectif;
+
+      // Body measurements (taille, poids) are strictly display-only for clients.
+      // They can only be entered/updated internally by authorized DietTemple staff.
+      const isStaff = req.user?.role === 'admin';
+      if (!isStaff && (taille !== undefined || poids !== undefined)) {
+        return res.status(403).json({
+          message: 'Les mensurations corporelles sont en lecture seule pour les clients et ne peuvent être modifiées que par le personnel autorisé DietTemple.',
+        });
+      }
+      if (isStaff) {
+        if (poids !== undefined) updateData.poids = poids;
+        if (taille !== undefined) updateData.taille = taille;
+      }
 
       if (email !== undefined && typeof email === 'string' && email.trim()) {
         const trimmedEmail = email.trim().toLowerCase();

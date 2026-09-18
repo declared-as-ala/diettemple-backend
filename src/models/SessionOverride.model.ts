@@ -19,6 +19,9 @@ const SessionOverrideItemSchema = new Schema(
     targetReps: { type: Schema.Types.Mixed, required: true },
     recommendedStartingWeightKg: Number,
     progressionRules: [ProgressionRuleSchema],
+    instruction: String,
+    message: String,
+    notes: String,
     order: { type: Number, default: 0 },
   },
   { _id: true }
@@ -31,6 +34,9 @@ export interface ISessionOverrideItem {
   targetReps: number | { min: number; max: number };
   recommendedStartingWeightKg?: number;
   progressionRules?: Array<Record<string, unknown>>;
+  instruction?: string;
+  message?: string;
+  notes?: string;
   order: number;
 }
 

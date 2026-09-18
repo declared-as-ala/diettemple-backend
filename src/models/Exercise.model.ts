@@ -19,6 +19,9 @@ export interface IExercise extends Document {
   videoUrl?: string;
   /** Stored filename for uploaded videos (under storage/video). */
   videoFilePath?: string;
+  instruction?: string;
+  message?: string;
+  warmupInstruction?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +72,15 @@ const ExerciseSchema: Schema = new Schema(
       type: String,
     },
     videoFilePath: {
+      type: String,
+    },
+    instruction: {
+      type: String,
+    },
+    message: {
+      type: String,
+    },
+    warmupInstruction: {
       type: String,
     },
   },
