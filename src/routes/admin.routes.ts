@@ -578,23 +578,43 @@ router.put(
   }
 );
 
-// DELETE /admin/products/:id - Delete product (soft delete)
+// DELETE /admin/products/:id - Delete product
 router.delete(
   '/products/:id',
   [param('id').isMongoId()],
   async (req: AuthRequest, res: Response) => {
     try {
-      const product = await Product.findById(req.params.id);
+      const product = await Product.findByIdAndDelete(req.params.id);
       if (!product) {
         return res.status(404).json({ message: 'Product not found' });
       }
 
-      // Soft delete: set stock to 0 and isFeatured to false
-      product.stock = 0;
-      product.isFeatured = false;
-      await product.save();
+      res.json({ message: 'Product deleted successfully', success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
 
-      res.json({ message: 'Product deleted successfully' });
+// POST /admin/products/bulk-delete - Delete multiple products
+router.post(
+  '/products/bulk-delete',
+  [body('ids').isArray({ min: 1 }).withMessage('Array of product IDs is required')],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { ids } = req.body;
+      const result = await Product.deleteMany({ _id: { $in: ids } });
+
+      res.json({
+        success: true,
+        message: `${result.deletedCount} produit(s) supprimé(s) avec succès`,
+        deletedCount: result.deletedCount,
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -770,6 +790,49 @@ router.put(
       await order.save();
 
       res.json({ order });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// DELETE /admin/orders/:id - Delete single order
+router.delete(
+  '/orders/:id',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findByIdAndDelete(req.params.id);
+      if (!order) {
+        return res.status(404).json({ message: 'Order not found' });
+      }
+
+      res.json({ success: true, message: 'Order deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+);
+
+// POST /admin/orders/bulk-delete - Delete multiple orders
+router.post(
+  '/orders/bulk-delete',
+  [body('ids').isArray({ min: 1 }).withMessage('Array of order IDs is required')],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { ids } = req.body;
+      const result = await Order.deleteMany({ _id: { $in: ids } });
+
+      res.json({
+        success: true,
+        message: `${result.deletedCount} commande(s) supprimée(s) avec succès`,
+        deletedCount: result.deletedCount,
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
