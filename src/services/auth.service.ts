@@ -109,6 +109,10 @@ export const authService = {
       throw new Error('Invalid credentials');
     }
 
+    // Record last login timestamp
+    user.lastLogin = new Date();
+    await user.save();
+
     const token = generateToken(
       user._id.toString(),
       user.tokenVersion || 0,
@@ -256,6 +260,10 @@ export const authService = {
     if (!user.biometricEnabled) {
       throw new Error('Biometric authentication not enabled for this user. Please enable it from settings.');
     }
+
+    // Record last login timestamp
+    user.lastLogin = new Date();
+    await user.save();
 
     // Generate new JWT token
     const token = generateToken(

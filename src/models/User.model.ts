@@ -26,6 +26,7 @@ export interface IUser extends Document {
   level?: 'Intiate' | 'Fighter' | 'Warrior' | 'Champion' | 'Elite';
   role?: 'user' | 'admin' | 'employee' | 'coach' | 'nutritionist';
   isActive: boolean;
+  lastLogin?: Date;
   biometricEnabled: boolean;
   biometricType: 'fingerprint' | 'faceid' | null;
   otp?: string;
@@ -122,6 +123,9 @@ const UserSchema: Schema = new Schema(
       type: Boolean,
       default: true,
       index: true,
+    },
+    lastLogin: {
+      type: Date,
     },
     tokenVersion: { type: Number, default: 0, select: false },
     biometricEnabled: {

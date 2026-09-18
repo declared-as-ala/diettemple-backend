@@ -54,27 +54,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy docker-compose.prod.yml and Caddyfile to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: 178.105.255.135
-          username: root
-          password: ${{ secrets.SSH_PASSWORD }}
-          source: "docker-compose.prod.yml,Caddyfile"
-          target: "/app/diettemple"
+      - name: Prepare configuration files
+        run: |
+          echo "DOCKER_COMPOSE_B64=$(base64 -w 0 docker-compose.prod.yml)" >> $GITHUB_ENV
+          echo "CADDYFILE_B64=$(base64 -w 0 Caddyfile)" >> $GITHUB_ENV
 
       - name: Deploy to VPS via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          DOCKER_COMPOSE_B64: ${{ env.DOCKER_COMPOSE_B64 }}
+          CADDYFILE_B64: ${{ env.CADDYFILE_B64 }}
         with:
           host: 178.105.255.135
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
+          envs: DOCKER_COMPOSE_B64,CADDYFILE_B64
           script: |
             mkdir -p /app/diettemple
             cd /app/diettemple
             
-            # Use the copied compose file as the active docker-compose.yml
-            mv -f docker-compose.prod.yml docker-compose.yml
+            # Write configuration files directly
+            echo "$DOCKER_COMPOSE_B64" | base64 -d > docker-compose.yml
+            echo "$CADDYFILE_B64" | base64 -d > Caddyfile
             
             # Log in to GitHub Container Registry
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
