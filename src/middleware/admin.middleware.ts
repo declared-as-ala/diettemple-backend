@@ -64,12 +64,8 @@ export const requireAdminOrEmployee = (
       return next();
     }
 
-    // Commandes module: allowed for employees (view orders, details, update status / payment-status)
+    // Commandes module: allowed for employees (view orders, details, update status / payment-status, delete)
     if (path.startsWith('/orders')) {
-      if (method === 'DELETE') {
-        console.error('❌ [REQUIRE ADMIN OR EMPLOYEE] Employee denied DELETE on orders');
-        return res.status(403).json({ message: 'Action de suppression non autorisée pour le rôle Employé' });
-      }
       console.log(`✅ [REQUIRE ADMIN OR EMPLOYEE] Employee order access granted: ${method} ${path}`);
       return next();
     }
