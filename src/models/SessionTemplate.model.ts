@@ -36,6 +36,7 @@ const SessionTemplateItemSchema = new Schema(
     instruction: { type: String, trim: true },
     message: { type: String, trim: true },
     notes: { type: String, trim: true },
+    clientInstruction: { type: String, trim: true },
     order: { type: Number, default: 0 },
   },
   { _id: true }
@@ -84,11 +85,15 @@ export interface ISessionTemplateItem {
   instruction?: string;
   message?: string;
   notes?: string;
+  clientInstruction?: string;
   order: number;
 }
 
 export interface ISessionTemplate extends Document {
   title: string;
+  internalName?: string;
+  displayName?: string;
+  folderId?: mongoose.Types.ObjectId;
   description?: string;
   difficulty?: 'beginner' | 'intermediate' | 'advanced';
   durationMinutes?: number;
@@ -112,6 +117,9 @@ export interface ISessionTemplate extends Document {
 const SessionTemplateSchema = new Schema(
   {
     title: { type: String, required: true, trim: true, index: true },
+    internalName: { type: String, trim: true, index: true },
+    displayName: { type: String, trim: true, index: true },
+    folderId: { type: Schema.Types.ObjectId, ref: 'Folder', default: null, index: true },
     description: { type: String },
     difficulty: {
       type: String,
@@ -124,5 +132,18 @@ const SessionTemplateSchema = new Schema(
   },
   { timestamps: true }
 );
+
+SessionTemplateSchema.pre('save', function (next) {
+  if (!this.displayName && this.title) {
+    this.displayName = this.title;
+  }
+  if (!this.internalName && this.title) {
+    this.internalName = this.title;
+  }
+  if (this.displayName && !this.title) {
+    this.title = this.displayName;
+  }
+  next();
+});
 
 export default mongoose.model<ISessionTemplate>('SessionTemplate', SessionTemplateSchema);

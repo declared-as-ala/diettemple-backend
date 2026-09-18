@@ -27,8 +27,10 @@ import { todayInBusinessTimeZone } from '../../utils/businessDate';
 import { avatarUpload, buildFilename, deleteFromMinio, uploadToMinio } from '../../lib/minioUpload';
 import { BUCKETS } from '../../lib/minioClient';
 import { requireAdmin } from '../../middleware/admin.middleware';
+import consultationRoutes from './consultation.routes';
 
 const router = Router();
+router.use('/:clientId/consultations', consultationRoutes);
 const now = new Date();
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 

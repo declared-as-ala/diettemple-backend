@@ -81,7 +81,7 @@ router.get(
           const items = t.items || [];
           populatedSession = {
             _id: t._id,
-            title: t.title,
+            title: t.displayName || t.title,
             description: t.description,
             difficulty: t.difficulty,
             durationMinutes: t.durationMinutes,
@@ -102,6 +102,7 @@ router.get(
                 targetReps: item.targetReps,
                 instruction: item.instruction || ex.instruction,
                 message: item.message || ex.message,
+                clientInstruction: item.clientInstruction || item.instruction || item.message,
                 warmupInstruction: item.warmupInstruction || ex.warmupInstruction,
                 notes: item.notes,
                 alternatives: item.alternatives || [],
@@ -113,6 +114,7 @@ router.get(
               order: item.order,
               instruction: item.instruction || item.exerciseId?.instruction,
               message: item.message || item.exerciseId?.message,
+              clientInstruction: item.clientInstruction || item.instruction || item.message,
               warmupInstruction: item.warmupInstruction || item.exerciseId?.warmupInstruction,
               notes: item.notes,
               exerciseId: item.exerciseId,
@@ -214,6 +216,7 @@ router.get(
           targetReps: item.targetReps,
           instruction: item.instruction || ex.instruction,
           message: item.message || ex.message,
+          clientInstruction: item.clientInstruction || item.instruction || item.message,
           warmupInstruction: item.warmupInstruction || ex.warmupInstruction,
           notes: item.notes,
           alternatives: item.alternatives || [],
@@ -222,7 +225,7 @@ router.get(
 
       const sessionPayload = {
         _id: templateObj._id,
-        title: templateObj.title,
+        title: templateObj.displayName || templateObj.title,
         description: templateObj.description,
         difficulty: templateObj.difficulty,
         duration: templateObj.durationMinutes ?? undefined,
@@ -237,6 +240,7 @@ router.get(
           order: item.order,
           instruction: item.instruction || item.exerciseId?.instruction,
           message: item.message || item.exerciseId?.message,
+          clientInstruction: item.clientInstruction || item.instruction || item.message,
           warmupInstruction: item.warmupInstruction || item.exerciseId?.warmupInstruction,
           notes: item.notes,
           progressionRules: item.progressionRules,

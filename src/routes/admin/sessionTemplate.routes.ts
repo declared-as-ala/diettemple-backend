@@ -13,6 +13,7 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('search').optional().isString(),
     query('difficulty').optional().isIn(['beginner', 'intermediate', 'advanced']),
+    query('folderId').optional().isString(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
@@ -23,13 +24,28 @@ router.get(
       if (req.query.search) {
         filter.$or = [
           { title: { $regex: req.query.search, $options: 'i' } },
+          { displayName: { $regex: req.query.search, $options: 'i' } },
+          { internalName: { $regex: req.query.search, $options: 'i' } },
           { description: { $regex: req.query.search, $options: 'i' } },
         ];
       }
       if (req.query.difficulty) filter.difficulty = req.query.difficulty;
+      if (req.query.folderId !== undefined) {
+        if (req.query.folderId === 'unassigned' || req.query.folderId === 'null') {
+          filter.folderId = { $in: [null, undefined] };
+        } else {
+          filter.folderId = req.query.folderId;
+        }
+      }
 
       const [sessionTemplates, total] = await Promise.all([
-        SessionTemplate.find(filter).sort({ title: 1 }).skip(skip).limit(limit).lean(),
+        SessionTemplate.find(filter)
+          .populate('folderId', 'name')
+          .populate('items.exerciseId', 'name muscleGroup difficulty equipment')
+          .sort({ title: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
         SessionTemplate.countDocuments(filter),
       ]);
       res.json({
@@ -49,6 +65,7 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const sessionTemplate = await SessionTemplate.findById(req.params.id)
+        .populate('folderId', 'name')
         .populate('items.exerciseId', 'name muscleGroup difficulty equipment')
         .lean();
       if (!sessionTemplate) {
@@ -65,7 +82,10 @@ router.get(
 router.post(
   '/',
   [
-    body('title').notEmpty().trim().withMessage('Title is required'),
+    body('title').optional().trim(),
+    body('internalName').optional().trim(),
+    body('displayName').optional().trim(),
+    body('folderId').optional({ nullable: true }),
     body('description').optional().isString(),
     body('difficulty').optional().isIn(['beginner', 'intermediate', 'advanced']),
     body('durationMinutes').optional().isInt({ min: 0 }),
@@ -75,8 +95,12 @@ router.post(
   ],
   async (req: AuthRequest, res: Response) => {
     try {
+      const title = req.body.title || req.body.displayName || req.body.internalName || 'Nouvelle séance';
       const doc = await SessionTemplate.create({
-        title: req.body.title,
+        title,
+        internalName: req.body.internalName || title,
+        displayName: req.body.displayName || title,
+        folderId: req.body.folderId || null,
         description: req.body.description,
         difficulty: req.body.difficulty,
         durationMinutes: req.body.durationMinutes,
@@ -85,6 +109,73 @@ router.post(
         warmup: req.body.warmup,
       });
       res.status(201).json({ sessionTemplate: doc.toObject() });
+    } catch (err: unknown) {
+      res.status(500).json({ message: (err as Error).message });
+    }
+  }
+);
+
+// POST /session-templates/:id/duplicate
+// Creates an independent deep-copy with new unique _id, copy suffix, and preserves all exercise configs
+router.post(
+  '/:id/duplicate',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const original = await SessionTemplate.findById(req.params.id).lean();
+      if (!original) {
+        return res.status(404).json({ message: 'Session template not found' });
+      }
+
+      const orig = original as any;
+      const copySuffix = ' - Copie';
+      const newInternalName = `${orig.internalName || orig.title || 'Séance'}${copySuffix}`;
+      const newDisplayName = `${orig.displayName || orig.title || 'Séance'}${copySuffix}`;
+      const newTitle = `${orig.title || 'Séance'}${copySuffix}`;
+
+      // Deep clone items with fresh subdocument identities
+      const clonedItems = (orig.items || []).map((item: any, idx: number) => ({
+        exerciseId: item.exerciseId?._id || item.exerciseId,
+        alternatives: (item.alternatives || []).map((alt: any) => alt?._id || alt),
+        sets: item.sets,
+        targetReps: item.targetReps,
+        recommendedStartingWeightKg: item.recommendedStartingWeightKg,
+        progressionRules: item.progressionRules || [],
+        instruction: item.instruction,
+        message: item.message,
+        notes: item.notes,
+        clientInstruction: item.clientInstruction,
+        order: item.order ?? idx,
+      }));
+
+      const clonedWarmup = orig.warmup
+        ? {
+            title: orig.warmup.title,
+            notes: orig.warmup.notes,
+            items: (orig.warmup.items || []).map((w: any, idx: number) => ({
+              title: w.title,
+              durationSeconds: w.durationSeconds,
+              reps: w.reps,
+              notes: w.notes,
+              order: w.order ?? idx,
+            })),
+          }
+        : undefined;
+
+      const duplicatedDoc = await SessionTemplate.create({
+        title: newTitle,
+        internalName: newInternalName,
+        displayName: newDisplayName,
+        folderId: orig.folderId || null,
+        description: orig.description,
+        difficulty: orig.difficulty,
+        durationMinutes: orig.durationMinutes,
+        tags: orig.tags || [],
+        items: clonedItems,
+        warmup: clonedWarmup,
+      });
+
+      res.status(201).json({ sessionTemplate: duplicatedDoc.toObject() });
     } catch (err: unknown) {
       res.status(500).json({ message: (err as Error).message });
     }
@@ -102,6 +193,12 @@ router.put(
         return res.status(404).json({ message: 'Session template not found' });
       }
       if (req.body.title != null) doc.title = req.body.title;
+      if (req.body.internalName != null) doc.internalName = req.body.internalName;
+      if (req.body.displayName != null) {
+        doc.displayName = req.body.displayName;
+        if (!req.body.title) doc.title = req.body.displayName;
+      }
+      if (req.body.folderId !== undefined) doc.folderId = req.body.folderId || null;
       if (req.body.description != null) doc.description = req.body.description;
       if (req.body.difficulty != null) doc.difficulty = req.body.difficulty;
       if (req.body.durationMinutes != null) doc.durationMinutes = req.body.durationMinutes;

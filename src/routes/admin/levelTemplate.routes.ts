@@ -37,10 +37,10 @@ router.get(
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('search').optional().isString(),
-    query('active').optional().isIn(['true', 'false']),
-    query('gender').optional().isIn(['M', 'F']),
+    query('active').optional().isIn(['true', 'false']),    query('gender').optional().isIn(['M', 'F']),
     query('objective').optional().isString(),
     query('level').optional().isString(),
+    query('folderId').optional().isString(),
   ],
   async (req: AuthRequest, res: Response) => {
     try {
@@ -60,9 +60,21 @@ router.get(
       if (req.query.gender) filter.gender = req.query.gender;
       if (req.query.objective) filter.objective = req.query.objective;
       if (req.query.level) filter.level = req.query.level;
+      if (req.query.folderId !== undefined) {
+        if (req.query.folderId === 'unassigned' || req.query.folderId === 'null') {
+          filter.folderId = { $in: [null, undefined] };
+        } else {
+          filter.folderId = req.query.folderId;
+        }
+      }
 
       const [levelTemplates, total] = await Promise.all([
-        LevelTemplate.find(filter).sort({ name: 1 }).skip(skip).limit(limit).lean(),
+        LevelTemplate.find(filter)
+          .populate('folderId', 'name')
+          .sort({ name: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
         LevelTemplate.countDocuments(filter),
       ]);
       res.json({
@@ -81,7 +93,9 @@ router.get(
   [param('id').isMongoId()],
   async (req: AuthRequest, res: Response) => {
     try {
-      const levelTemplate = await LevelTemplate.findById(req.params.id).lean();
+      const levelTemplate = await LevelTemplate.findById(req.params.id)
+        .populate('folderId', 'name')
+        .lean();
       if (!levelTemplate) {
         return res.status(404).json({ message: 'Level template not found' });
       }
@@ -100,6 +114,7 @@ router.post(
     body('clientDisplayName').notEmpty().trim().isLength({ min: 2, max: 120 }).withMessage('Veuillez saisir le nom affiché au client.'),
     body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
     body('objective').optional().isString().trim(),
+    body('folderId').optional({ nullable: true }),
     body('description').optional().isString(),
     body('imageUrl').optional().isString(),
     body('isActive').optional().isBoolean(),
@@ -123,7 +138,7 @@ router.post(
       const durationWeeks = req.body.durationWeeks ? Number(req.body.durationWeeks) : 5;
       const initialWeeks = Array.from({ length: durationWeeks }, (_, i) => ({
         weekNumber: i + 1,
-        days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }
+        days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] },
       }));
 
       const plan = await LevelTemplate.create({
@@ -131,6 +146,7 @@ router.post(
         clientDisplayName: req.body.clientDisplayName ? req.body.clientDisplayName.trim() : req.body.name.trim(),
         level: req.body.level || 'INITIATE',
         objective: req.body.objective ? req.body.objective.trim() : undefined,
+        folderId: req.body.folderId || null,
         description: req.body.description,
         imageUrl: req.body.imageUrl,
         isActive: req.body.isActive !== false,
@@ -157,6 +173,7 @@ router.put(
     body('clientDisplayName').optional().trim().isLength({ min: 2, max: 120 }).withMessage('Le nom affiché au client doit contenir entre 2 et 120 caractères.'),
     body('level').optional().isIn(['INITIATE', 'FIGHTER', 'WARRIOR', 'CHAMPION', 'ELITE']).withMessage('level must be one of: INITIATE, FIGHTER, WARRIOR, CHAMPION, ELITE'),
     body('objective').optional().isString().trim(),
+    body('folderId').optional({ nullable: true }),
     body('gender').optional().isIn(['M', 'F']).withMessage('gender must be M or F'),
     body('minimumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('minimumSessionsPerWeek must be 1-7'),
     body('maximumSessionsPerWeek').optional().isInt({ min: 1, max: 7 }).withMessage('maximumSessionsPerWeek must be 1-7'),
@@ -176,6 +193,7 @@ router.put(
       if (req.body.clientDisplayName != null && req.body.clientDisplayName.trim() !== '') plan.clientDisplayName = req.body.clientDisplayName.trim();
       if (req.body.level !== undefined) plan.level = req.body.level;
       if (req.body.objective !== undefined) plan.objective = req.body.objective ? req.body.objective.trim() : undefined;
+      if (req.body.folderId !== undefined) plan.folderId = req.body.folderId || null;
       if (req.body.description != null) plan.description = req.body.description;
       if (req.body.imageUrl !== undefined) plan.imageUrl = req.body.imageUrl;
       if (req.body.isActive != null) plan.isActive = req.body.isActive;

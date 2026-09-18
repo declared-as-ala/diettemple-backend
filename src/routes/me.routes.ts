@@ -1719,7 +1719,12 @@ router.get(
         .populate('items.alternatives', 'name muscleGroup equipment videoUrl instruction message warmupInstruction')
         .lean();
       if (!session) return res.status(404).json({ message: 'Session not found' });
-      res.json({ session });
+      const s = { ...session } as any;
+      if (s.displayName) {
+        s.title = s.displayName;
+      }
+      delete s.internalName;
+      res.json({ session: s });
     } catch (e: unknown) {
       res.status(500).json({ message: (e as Error).message });
     }

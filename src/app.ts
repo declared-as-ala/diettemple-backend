@@ -89,7 +89,7 @@ app.use('/api/verification', authenticate, verificationRoutes);
 app.use('/api/me', authenticate, meRoutes);
 app.use('/api/users/me', authenticate, meRoutes);
 app.use('/api/admin', authenticate, requireAdminOrEmployee, adminRoutes);
-app.use('/api/admin/workout-plan', authenticate, requireAdminOrEmployee, workoutPlanAdminRoutes);
+app.use('/api/admin/workout-plan', authenticate, requireAdmin, workoutPlanAdminRoutes);
 app.use('/api/foods', authenticate, foodsRoutes);
 app.use('/api/recipes', recipesRoutes);
 app.use('/api/leads', leadsRoutes);

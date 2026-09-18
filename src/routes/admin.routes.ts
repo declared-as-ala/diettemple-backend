@@ -29,6 +29,8 @@ import nutritionAssignmentRoutes from './admin/nutritionAssignment.routes';
 import clientsRoutes from './admin/clients.routes';
 import recipesRoutes from './admin/recipes.routes';
 import landingVideoRoutes from './admin/landingVideo.routes';
+import folderRoutes from './admin/folder.routes';
+import consultationRoutes from './admin/consultation.routes';
 import Support from '../models/Support.model';
 
 const router = Router();
@@ -43,6 +45,8 @@ function toLevelSlug(input: string): string {
 }
 
 // Coaching
+router.use('/folders', folderRoutes);
+router.use('/consultations', consultationRoutes);
 router.use('/level-templates', levelTemplateRoutes);
 router.use('/session-templates', sessionTemplateRoutes);
 router.use('/subscriptions', subscriptionRoutes);

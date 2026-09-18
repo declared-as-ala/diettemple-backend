@@ -96,6 +96,7 @@ export interface IWeekTemplate {
 export interface ILevelTemplate extends Document {
   name: string;
   clientDisplayName?: string;
+  folderId?: mongoose.Types.ObjectId;
   description?: string;
   imageUrl?: string;
   isActive: boolean;
@@ -135,6 +136,7 @@ const LevelTemplateSchema = new Schema(
   {
     name: { type: String, required: true, trim: true, index: true },
     clientDisplayName: { type: String, trim: true, index: true },
+    folderId: { type: Schema.Types.ObjectId, ref: 'Folder', default: null, index: true },
     gender: { type: String, enum: ['M', 'F'], default: 'M', index: true },
     objective: { type: String, trim: true, index: true },
     level: {
