@@ -36,6 +36,7 @@ import {
   getProgramWeekDates,
   getPlanDayKeyForDate,
 } from '../utils/scheduleDate';
+import { serializeExerciseVideo, serializeExerciseVideosDeep } from '../utils/exerciseVideo';
 import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
 import { findMostRecentOverdueSession, findOverdueSessions } from '../services/catchUp.service';
 import { calculateTrainingWeekProgress } from '../services/weeklyProgress.service';
@@ -1724,7 +1725,7 @@ router.get(
         s.title = s.displayName;
       }
       delete s.internalName;
-      res.json({ session: s });
+      res.json({ session: serializeExerciseVideosDeep(s) });
     } catch (e: unknown) {
       res.status(500).json({ message: (e as Error).message });
     }
@@ -1739,7 +1740,7 @@ router.get(
     try {
       const exercise = await Exercise.findById(req.params.exerciseId).lean();
       if (!exercise) return res.status(404).json({ message: 'Exercise not found' });
-      res.json({ exercise });
+      res.json({ exercise: serializeExerciseVideo(exercise as any) });
     } catch (e: unknown) {
       res.status(500).json({ message: (e as Error).message });
     }

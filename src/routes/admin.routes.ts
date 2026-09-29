@@ -80,6 +80,7 @@ import {
   deleteProductImageFromMinio,
 } from '../services/productImage.service';
 import { generateUniqueProductSlug } from '../utils/slug.utils';
+import { serializeExerciseVideo } from '../utils/exerciseVideo';
 const upload = videoUpload;                  // exercise video upload
 const levelHomeVideoUpload = videoUpload;    // level-home video upload
 
@@ -1551,7 +1552,7 @@ router.get(
       const total = await Exercise.countDocuments(filter);
 
       res.json({
-        exercises,
+        exercises: exercises.map((exercise) => serializeExerciseVideo(exercise as any)),
         pagination: {
           page,
           limit,
@@ -1586,7 +1587,7 @@ router.get(
       if (!exercise) {
         return res.status(404).json({ message: 'Exercise not found' });
       }
-      res.json({ exercise });
+      res.json({ exercise: serializeExerciseVideo(exercise as any) });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1604,7 +1605,7 @@ router.post(
     try {
       const exercise = new Exercise(req.body);
       await exercise.save();
-      res.status(201).json({ exercise });
+      res.status(201).json({ exercise: serializeExerciseVideo(exercise.toObject() as any) });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1625,7 +1626,7 @@ router.put(
       Object.assign(exercise, req.body);
       await exercise.save();
 
-      res.json({ exercise });
+      res.json({ exercise: serializeExerciseVideo(exercise.toObject() as any) });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1670,27 +1671,63 @@ router.post(
         return res.status(400).json({ message: 'Veuillez envoyer un fichier vidéo.' });
       }
 
-      // Delete old video from MinIO if it was an uploaded file
-      if ((exercise as any).videoSource === 'upload' && exercise.videoUrl) {
-        await deleteFromMinio(exercise.videoUrl);
-      }
-
       // Upload new video to MinIO: bucket=videos, key=exercises/{id}/video_{ts}.mp4
       const exerciseId = sanitizeSegment(String(req.params.id));
       const filename   = buildFilename(req.file.originalname, 'video', ['.mp4', '.webm']);
       const objectKey  = `exercises/${exerciseId}/${filename}`;
       const videoUrl   = await uploadToMinio(req.file, BUCKETS.VIDEOS, objectKey);
+      const previousUploadUrl = (exercise as any).videoSource === 'upload' ? exercise.videoUrl : undefined;
 
       (exercise as any).videoSource   = 'upload';
       (exercise as any).videoFilePath = objectKey;
       exercise.videoUrl = videoUrl;
-      await exercise.save();
+      try {
+        await exercise.save();
+      } catch (saveError) {
+        await deleteFromMinio(videoUrl);
+        throw saveError;
+      }
+
+      await deleteFromMinio(previousUploadUrl);
 
       const updatedExercise = await Exercise.findById(req.params.id).lean();
-      res.json({ exercise: updatedExercise, message: 'Video uploaded successfully', videoUrl });
+      res.json({
+        exercise: serializeExerciseVideo(updatedExercise as any),
+        message: 'Video uploaded successfully',
+        videoUrl,
+      });
     } catch (error: any) {
       if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
       res.status(500).json({ message: error?.message || 'Failed to update video' });
+    }
+  }
+);
+
+// DELETE /admin/exercises/:id/video - Remove an uploaded/external exercise video without deleting the exercise
+router.delete(
+  '/exercises/:id/video',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const exercise = await Exercise.findById(req.params.id);
+      if (!exercise) {
+        return res.status(404).json({ message: 'Exercise not found' });
+      }
+
+      const previousUploadUrl = (exercise as any).videoSource === 'upload' ? exercise.videoUrl : undefined;
+      (exercise as any).videoSource = undefined;
+      (exercise as any).videoFilePath = undefined;
+      exercise.videoUrl = undefined;
+      await exercise.save();
+
+      await deleteFromMinio(previousUploadUrl);
+
+      res.json({
+        exercise: serializeExerciseVideo(exercise.toObject() as any),
+        message: 'Video removed successfully',
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error?.message || 'Failed to remove video' });
     }
   }
 );

@@ -9,6 +9,7 @@ import Program from '../models/Program.model';
 import BodyProgressPhoto from '../models/BodyProgressPhoto.model';
 import CoachEvent from '../models/CoachEvent.model';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { serializeExerciseVideosDeep } from '../utils/exerciseVideo';
 
 const router = express.Router();
 
@@ -139,7 +140,7 @@ router.get(
         nextNutritionistVisit,
       };
 
-      res.json({ dailyProgram: response });
+      res.json({ dailyProgram: serializeExerciseVideosDeep(response) });
     } catch (error: any) {
       console.error('Error fetching daily program:', error);
       res.status(500).json({ message: error.message });
@@ -176,7 +177,7 @@ router.get(
         const exercises = sessionObj.exerciseConfigs?.length
           ? sessionObj.exerciseConfigs.map((c: any) => ({ ...c.exerciseId?.toObject?.() || c.exerciseId, sets: c.sets, targetReps: c.targetReps, order: c.order }))
           : sessionObj.exercises || [];
-        return res.json({
+        return res.json(serializeExerciseVideosDeep({
           session: {
             _id: sessionObj._id,
             title: sessionObj.title,
@@ -186,7 +187,7 @@ router.get(
             exercises: Array.isArray(exercises) ? exercises : [],
             exerciseConfigs: sessionObj.exerciseConfigs || undefined,
           },
-        });
+        }));
       }
 
       // 2) Try SessionTemplate (what /me/today returns as sessionTemplateId)
@@ -249,7 +250,7 @@ router.get(
         })),
       };
 
-      return res.json({ session: sessionPayload });
+      return res.json({ session: serializeExerciseVideosDeep(sessionPayload) });
     } catch (error: any) {
       console.error('Error fetching session:', error);
       res.status(500).json({ message: error.message });
@@ -263,9 +264,9 @@ router.get(
   authenticate,
   async (req: AuthRequest, res: Response) => {
     try {
-      const exercises = await Exercise.find().sort({ name: 1 });
+      const exercises = await Exercise.find().sort({ name: 1 }).lean();
 
-      res.json({ exercises });
+      res.json({ exercises: serializeExerciseVideosDeep(exercises) });
     } catch (error: any) {
       console.error('Error fetching exercises:', error);
       res.status(500).json({ message: error.message });
