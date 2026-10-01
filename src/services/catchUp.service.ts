@@ -19,7 +19,10 @@ import {
   getPlanDayKeyForDate,
   MS_PER_DAY,
 } from '../utils/scheduleDate';
+import { loadEffectiveLevel } from './clientSchedule.service';
 import type { ILevelTemplate } from '../models/LevelTemplate.model';
+import { resolveWorkoutAssignment } from './workoutAssignment.service';
+import { businessDateAsUtcCalendarDate, businessDateKey } from '../utils/businessDate';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -111,15 +114,14 @@ export async function findOverdueSessions(params: {
   const week = (levelDoc.weeks as any[]).find((w) => w.weekNumber === currentWeekN) ?? null;
   const orderedSessions = resolveWeekSessions(week);
 
-  const nowTunisiaKey = tunisiaDateKey(now);
-  const nowUtcKey = utcDateKey(now);
+  const nowBusinessKey = businessDateKey(now);
 
   for (const date of weekDates) {
     const dateTunisiaKey = tunisiaDateKey(date);
     const dateUtcKey = utcDateKey(date);
 
-    // Only past days in the current week can be overdue/missed (Requirement 3)
-    if (dateTunisiaKey >= nowTunisiaKey && dateUtcKey >= nowUtcKey) {
+    // Only days strictly before "today" in the business timezone can be overdue/missed
+    if (dateUtcKey >= nowBusinessKey) {
       continue;
     }
 
@@ -156,18 +158,58 @@ export async function findOverdueSessions(params: {
     }
   }
 
-  // Enforce chronological order (oldest first) (Requirement 5)
-  results.sort((a, b) => a.recommendedAt.getTime() - b.recommendedAt.getTime());
+  // Canonical program order: by scheduled day, then by the week's sessionOrder for same-day ties.
+  results.sort(
+    (a, b) =>
+      a.recommendedAt.getTime() - b.recommendedAt.getTime() || a.sessionOrder - b.sessionOrder
+  );
   return results;
 }
 
 /**
- * Returns the single actionable overdue session (oldest missed session of the current week).
- * When this session is completed, it immediately disappears and the next oldest becomes actionable.
+ * Returns the single actionable overdue session (first missed session of the current week in
+ * program order). The client never chooses: the server decides. When this session is completed it
+ * disappears and the next one in order becomes actionable.
  */
 export async function findMostRecentOverdueSession(
   params: Parameters<typeof findOverdueSessions>[0]
 ): Promise<OverdueSession | null> {
   const all = await findOverdueSessions(params);
   return all[0] ?? null;
+}
+
+/**
+ * Server-side resolution of THE eligible rattrapage for a user right now (null if none).
+ * Same inputs as /me/today so the card the client sees and the validation here always agree.
+ */
+export async function resolveEligibleRattrapage(
+  userId: unknown,
+  now: Date = new Date()
+): Promise<OverdueSession | null> {
+  const assignment = await resolveWorkoutAssignment(userId as any);
+  if (!assignment || !(assignment as any).levelTemplateId) return null;
+  const { level: levelDoc } = await loadEffectiveLevel(userId, (assignment as any).levelTemplateId);
+  if (!levelDoc) return null;
+  return findMostRecentOverdueSession({
+    userId,
+    levelDoc: levelDoc as any,
+    planStart: businessDateAsUtcCalendarDate(new Date((assignment as any).startDate)),
+    durationWeeks: Number((assignment as any).durationWeeks),
+    now,
+  });
+}
+
+/** True only when the requested session (and original date, if given) is exactly the eligible one. */
+export function matchesEligibleRattrapage(
+  eligible: OverdueSession | null,
+  sessionTemplateId: unknown,
+  originalScheduledDate?: unknown
+): boolean {
+  if (!eligible) return false;
+  if (String(sessionTemplateId) !== eligible.sessionTemplateId) return false;
+  if (originalScheduledDate) {
+    const requested = String(originalScheduledDate).slice(0, 10);
+    if (requested !== eligible.originalDate) return false;
+  }
+  return true;
 }

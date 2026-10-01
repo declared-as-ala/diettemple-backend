@@ -29,7 +29,9 @@ export interface IWorkoutSession extends Document {
   completedAt?: Date;
   durationSeconds?: number;          // total duration in seconds
   totalSessionVolumeKg?: number;     // sum of all exercise volumes
-  status: 'active' | 'completed' | 'abandoned';
+  status: 'active' | 'completed' | 'abandoned' | 'expired';
+  /** Set when an unfinished session passed its 20h window (startedAt + 20h). */
+  expiredAt?: Date;
   /** 'rattrapage' = completed as catch-up for a previously missed session */
   completionType?: 'normal' | 'rattrapage';
   /** For rattrapages: the UTC calendar date the session was originally scheduled */
@@ -134,8 +136,11 @@ const WorkoutSessionSchema: Schema = new Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'completed', 'abandoned'],
+      enum: ['active', 'completed', 'abandoned', 'expired'],
       default: 'active',
+    },
+    expiredAt: {
+      type: Date,
     },
     completionType: {
       type: String,

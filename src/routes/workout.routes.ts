@@ -11,6 +11,12 @@ import Exercise from '../models/Exercise.model';
 import User from '../models/User.model';
 import GymCheckin from '../models/GymCheckin.model';
 import { AuthRequest } from '../middleware/auth.middleware';
+import {
+  expireStaleWorkoutSessions,
+  serializeWorkoutSession,
+  isFutureOnlySession,
+} from '../services/workoutSessionWindow.service';
+import { resolveEligibleRattrapage, matchesEligibleRattrapage } from '../services/catchUp.service';
 
 const router = express.Router();
 
@@ -34,6 +40,9 @@ router.post(
       if (!sessionId) {
         return res.status(400).json({ message: 'Session ID is required' });
       }
+
+      const nowServer = new Date();
+      await expireStaleWorkoutSessions(req.user._id, nowServer);
 
       const dateKey = clientDateKey || getDateKeyLocal();
       const checkin = await GymCheckin.findOne({
@@ -86,6 +95,14 @@ router.post(
         status: 'active',
       }).sort({ startedAt: -1 });
 
+      // Resuming an in-window session is always allowed; STARTING one scheduled only in the future is not.
+      if (!workoutSession && (await isFutureOnlySession(req.user._id, String(sessionId), nowServer, clientDateKey))) {
+        return res.status(403).json({
+          code: 'FUTURE_SESSION_LOCKED',
+          message: "Cette séance n'est pas encore disponible.",
+        });
+      }
+
       if (!workoutSession) {
         workoutSession = await WorkoutSession.create({
           userId: req.user._id,
@@ -99,7 +116,7 @@ router.post(
         });
       }
 
-      res.status(201).json({ workoutSession });
+      res.status(201).json({ workoutSession: serializeWorkoutSession(workoutSession, nowServer) });
     } catch (error: any) {
       console.error('Error starting workout session:', error);
       res.status(500).json({ message: error.message });
@@ -394,6 +411,29 @@ router.post(
         return res.status(404).json({ message: 'Workout session not found' });
       }
 
+      await expireStaleWorkoutSessions(req.user._id, new Date());
+      if (workoutSession.status !== 'completed') {
+        const fresh = await WorkoutSession.findById(workoutSession._id).select('status').lean();
+        if ((fresh as any)?.status === 'expired' || (fresh as any)?.status === 'abandoned') {
+          return res.status(410).json({
+            code: 'WORKOUT_SESSION_EXPIRED',
+            message: 'Le délai de 20 heures pour terminer cette séance est dépassé.',
+          });
+        }
+      }
+
+      // Rattrapage tagging is server-decided: reject anything but the eligible session.
+      if (completionType === 'rattrapage' || originalScheduledDate) {
+        const eligible = await resolveEligibleRattrapage(req.user._id, new Date());
+        if (!matchesEligibleRattrapage(eligible, workoutSession.sessionId, originalScheduledDate)) {
+          return res.status(409).json({
+            code: 'RATTRAPAGE_NOT_ELIGIBLE',
+            message: 'Cette séance ne peut pas être rattrapée.',
+            eligibleSessionTemplateId: eligible?.sessionTemplateId ?? null,
+          });
+        }
+      }
+
       // Complete the workout session idempotently
       if (workoutSession.status !== 'completed') {
         workoutSession.status = 'completed';
@@ -428,34 +468,30 @@ router.post(
   }
 );
 
-// Get active workout session
+// Get resumable (in-progress, inside the 20h window) workout sessions.
+// Optional ?sessionId=<template id> returns that session's in-progress record.
 router.get(
   '/active',
   authenticate,
   async (req: AuthRequest, res: Response) => {
     try {
-      const workoutSession = await WorkoutSession.findOne({
-        userId: req.user._id,
-        status: 'active',
-      })
+      const now = new Date();
+      await expireStaleWorkoutSessions(req.user._id, now);
+
+      const filter: any = { userId: req.user._id, status: 'active' };
+      if (req.query.sessionId) filter.sessionId = String(req.query.sessionId);
+      const docs = await WorkoutSession.find(filter)
         .populate('sessionId')
         .populate('exercises.exerciseId')
         .sort({ startedAt: -1 });
 
-      if (!workoutSession) {
+      if (docs.length === 0) {
         return res.status(404).json({ message: 'No active workout session' });
       }
 
-      // Active workout resume must expire after 20 hours
-      const TWENTY_HOURS_MS = 20 * 60 * 60 * 1000;
-      const lastActive = workoutSession.updatedAt || workoutSession.startedAt || (workoutSession as any).createdAt;
-      if (lastActive && Date.now() - new Date(lastActive).getTime() > TWENTY_HOURS_MS) {
-        workoutSession.status = 'abandoned';
-        await workoutSession.save();
-        return res.status(404).json({ message: 'Active workout session has expired (exceeded 20 hours)' });
-      }
-
-      res.json({ workoutSession });
+      const sessions = docs.map((d) => serializeWorkoutSession(d, now));
+      // workoutSession = most recent (backwards compatible); workoutSessions = all resumable ones.
+      res.json({ workoutSession: sessions[0], workoutSessions: sessions, serverNow: now });
     } catch (error: any) {
       console.error('Error fetching active workout session:', error);
       res.status(500).json({ message: error.message });

@@ -8,6 +8,8 @@
  *   Week 2 starts on the Monday immediately following Week 1's Sunday.
  */
 
+import { businessDateAsUtcCalendarDate } from './businessDate';
+
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const PLAN_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type PlanDayKey = (typeof PLAN_DAY_KEYS)[number];
@@ -130,7 +132,9 @@ export function getPlanDayPosition(
   planStart: Date
 ): { diffDays: number; weekIndex: number; dayIndex: number } {
   const { startMs, week1SundayMs, week2MondayMs } = getProgramWeekInfo(planStart);
-  const targetMs = utcStartOfCalendarDate(target);
+  // `target` may be a real instant (e.g. 23:30Z = 00:30 next day in Tunis): use its Africa/Tunis calendar day.
+  // Calendar dates already stored as UTC midnight map to themselves.
+  const targetMs = utcStartOfCalendarDate(businessDateAsUtcCalendarDate(target));
   const diffDays = Math.floor((targetMs - startMs) / MS_PER_DAY);
 
   if (targetMs < startMs) {

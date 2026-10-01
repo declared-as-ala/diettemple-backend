@@ -24,6 +24,8 @@ import { emitUserUpdated } from '../../realtime/userRealtime';
 import PlanAssignment from '../../models/PlanAssignment.model';
 import { assertAssignablePlan, createPlanAssignment, reconcileUserAssignments } from '../../services/planAssignmentLifecycle.service';
 import { todayInBusinessTimeZone } from '../../utils/businessDate';
+import { resolveWorkoutAssignment } from '../../services/workoutAssignment.service';
+import { loadEffectiveLevel, buildScheduleTrace } from '../../services/clientSchedule.service';
 import { avatarUpload, buildFilename, deleteFromMinio, uploadToMinio } from '../../lib/minioUpload';
 import { BUCKETS } from '../../lib/minioClient';
 import { requireAdmin } from '../../middleware/admin.middleware';
@@ -213,44 +215,43 @@ router.post(
   }
 );
 
-// GET /:id/plan — base level template + client overrides merged
+// GET /:id/plan — base level template + client overrides merged.
+// Reads the SAME plan the mobile app uses (PlanAssignment + valid client override), not the Subscription.
 router.get(
   '/:id/plan',
   [param('id').isMongoId()],
   async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.params.id;
-      const sub = await Subscription.findOne({ userId, status: 'ACTIVE', endAt: { $gt: now } })
-        .populate('levelTemplateId')
-        .lean();
-      if (!sub) {
+      const assignment = await resolveWorkoutAssignment(userId);
+      if (!assignment) {
         return res.json({ baseLevelTemplate: null, override: null, mergedWeeks: null });
       }
-      const level = sub.levelTemplateId as any;
-      const levelDoc = await LevelTemplate.findById(level?._id).lean();
-      const override = await ClientPlanOverride.findOne({ userId, status: 'active' }).lean();
-      if (!levelDoc) {
-        return res.json({ baseLevelTemplate: levelDoc, override: null, mergedWeeks: (levelDoc as any)?.weeks || null });
+      const base = await LevelTemplate.findById(assignment.levelTemplateId).lean();
+      const { level, override } = await loadEffectiveLevel(userId, assignment.levelTemplateId);
+      if (!base || !level) {
+        return res.json({ baseLevelTemplate: base, override: null, mergedWeeks: (base as any)?.weeks || null });
       }
-      const baseWeeks = (levelDoc as any).weeks || [];
-      const overrideWeeks = (override as any)?.overridesByWeek || [];
-      const mergedWeeks = baseWeeks.map((w: any) => {
-        const ow = overrideWeeks.find((x: any) => x.weekNumber === w.weekNumber);
-        const days: Record<string, any[]> = {};
-        DAY_KEYS.forEach((d) => {
-          const ov = ow?.days?.[d];
-          days[d] = (ov && ov.length > 0 ? ov : w.days?.[d] || []).map((p: any) => ({
-            sessionTemplateId: p.sessionTemplateId,
-            overrideSessionConfigId: p.overrideSessionConfigId || undefined,
-            note: p.note,
-            order: p.order ?? 0,
-          }));
-        });
-        return { weekNumber: w.weekNumber, days };
-      });
+      const overrideDoc = override.applied ? await ClientPlanOverride.findOne({ userId, status: 'active' }).lean() : null;
+      const mergedWeeks = level.weeks.map((w: any) => ({
+        weekNumber: w.weekNumber,
+        days: Object.fromEntries(
+          DAY_KEYS.map((d) => [
+            d,
+            (w.days?.[d] || []).map((p: any) => ({
+              sessionTemplateId: p.sessionTemplateId,
+              overrideSessionConfigId: p.overrideSessionConfigId || undefined,
+              note: p.note,
+              order: p.order ?? 0,
+            })),
+          ])
+        ),
+      }));
       res.json({
-        baseLevelTemplate: levelDoc,
-        override: override || null,
+        baseLevelTemplate: base,
+        override: overrideDoc || null,
+        overrideStatus: override,
+        planAssignmentId: String(assignment._id),
         mergedWeeks,
       });
     } catch (e: unknown) {
@@ -258,6 +259,15 @@ router.get(
     }
   }
 );
+
+// GET /:id/schedule-trace — flat ID-based schedule; identical builder to GET /api/me/plan/trace
+router.get('/:id/schedule-trace', [param('id').isMongoId()], async (req: AuthRequest, res: Response) => {
+  try {
+    res.json(await buildScheduleTrace(req.params.id, new Date()));
+  } catch (e: unknown) {
+    res.status(500).json({ message: (e as Error).message });
+  }
+});
 
 // PUT /:id/plan/week/:weekNumber
 router.put(
@@ -278,15 +288,23 @@ router.put(
       if (totalSessions < 4 || totalSessions > 7) {
         return res.status(400).json({ message: 'Week must have 4–7 sessions' });
       }
-      const sub = await Subscription.findOne({ userId, status: 'ACTIVE', endAt: { $gt: now } });
-      if (!sub) return res.status(400).json({ message: 'No active subscription for this client' });
+      const assignment = await resolveWorkoutAssignment(userId);
+      if (!assignment) return res.status(400).json({ message: 'No active plan assignment for this client' });
       let override = await ClientPlanOverride.findOne({ userId });
       if (!override) {
         override = await ClientPlanOverride.create({
           userId,
-          baseLevelTemplateId: sub.levelTemplateId,
+          baseLevelTemplateId: assignment.levelTemplateId,
           status: 'active',
         });
+      } else if (String(override.baseLevelTemplateId) !== String(assignment.levelTemplateId)) {
+        // The client was moved to another plan: the old override no longer applies. Rebase it (week edits reset).
+        override.baseLevelTemplateId = assignment.levelTemplateId as any;
+        (override as any).overridesByWeek = [1, 2, 3, 4, 5].map((weekNumber) => ({
+          weekNumber,
+          days: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] },
+        }));
+        override.status = 'active';
       }
       const weekIdx = override.overridesByWeek.findIndex((w: any) => w.weekNumber === weekNumber);
       const newDays: Record<string, any[]> = {};

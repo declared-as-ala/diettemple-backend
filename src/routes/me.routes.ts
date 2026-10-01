@@ -38,7 +38,14 @@ import {
 } from '../utils/scheduleDate';
 import { serializeExerciseVideo, serializeExerciseVideosDeep } from '../utils/exerciseVideo';
 import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
-import { findMostRecentOverdueSession, findOverdueSessions } from '../services/catchUp.service';
+import {
+  findMostRecentOverdueSession,
+  findOverdueSessions,
+  resolveEligibleRattrapage,
+  matchesEligibleRattrapage,
+} from '../services/catchUp.service';
+import { loadEffectiveLevel, buildScheduleTrace } from '../services/clientSchedule.service';
+import { expireStaleWorkoutSessions } from '../services/workoutSessionWindow.service';
 import { calculateTrainingWeekProgress } from '../services/weeklyProgress.service';
 import { resolveWorkoutAssignment } from '../services/workoutAssignment.service';
 import { addBusinessDays, businessDateAsUtcCalendarDate, businessDateKey } from '../utils/businessDate';
@@ -337,7 +344,7 @@ router.get(
       const effectivePlanStart = planAssignment ? normalizePlanStartDate(new Date(planAssignment.startDate)) : null;
 
       if (effectiveLevelId && effectivePlanStart) {
-        const levelDoc = await LevelTemplate.findById(effectiveLevelId).lean();
+        const { level: levelDoc } = await loadEffectiveLevel(userId, effectiveLevelId);
         hasLevelTemplatePlan =
           !!levelDoc && Array.isArray((levelDoc as any).weeks) && (levelDoc as any).weeks.length > 0;
 
@@ -539,7 +546,7 @@ router.get(
 
         // Always search for a missed session regardless of today's session state
         if (effectiveLevelId && hasLevelTemplatePlan && effectivePlanStart) {
-          const levelDoc = await LevelTemplate.findById(effectiveLevelId).lean();
+          const { level: levelDoc } = await loadEffectiveLevel(userId, effectiveLevelId);
           const missed = await findMostRecentOverdueSession({
             userId,
             levelDoc: levelDoc as any,
@@ -1046,7 +1053,11 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
         levelName = level?.name ?? null;
         slugFromTemplateName = levelName ? toLevelSlug(levelName) : null;
 
-        const levelDoc = await LevelTemplate.findById(level._id).lean();
+        // Planned sessions come from the SAME plan the schedule uses (assignment + client override).
+        const { level: levelDoc } = await loadEffectiveLevel(
+          userId,
+          (planAssignment as any)?.levelTemplateId ?? level._id
+        );
         const targetWeek = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
         planned = resolveWeekSessions(targetWeek).length;
       }
@@ -1152,11 +1163,9 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     const currentActiveWeekNumber = getCurrentWeekNumber(anchorStart, durationWeeks, new Date());
 
     // Resolve template / week sessions
-    const planOverride = await ClientPlanOverride.findOne({ userId, status: 'active' }).lean();
-    const levelId = planOverride
-      ? (planOverride as any).baseLevelTemplateId
-      : (planAssignment as any)?.levelTemplateId;
-    const level = levelId ? await LevelTemplate.findById(levelId).lean() : null;
+    const { level } = planAssignment
+      ? await loadEffectiveLevel(userId, (planAssignment as any).levelTemplateId)
+      : { level: null };
     const week = (level as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
     const orderedSessions = resolveWeekSessions(week);
 
@@ -1335,11 +1344,7 @@ router.get(
       const planStartMs = utcStartOfCalendarDate(planStart);
 
       // Level resolution priority: ClientPlanOverride -> assignment level template.
-      const planOverride = await ClientPlanOverride.findOne({ userId, status: 'active' }).lean();
-      const levelId = planOverride
-        ? (planOverride as any).baseLevelTemplateId
-        : (assignment as any).levelTemplateId;
-      const level = levelId ? await LevelTemplate.findById(levelId).lean() : null;
+      const { level } = await loadEffectiveLevel(userId, (assignment as any).levelTemplateId);
       const week = (level as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
       const hasLevelTemplatePlan = !!level && Array.isArray((level as any).weeks) && (level as any).weeks.length > 0;
       const dayKeys = PLAN_DAY_KEYS;
@@ -1388,6 +1393,23 @@ router.get(
       const nowUtcKey = utcDateKey(new Date());
       const currentWeekNumber = getCurrentWeekNumber(planStart, durationWeeks, new Date());
       const weekDates = getProgramWeekDates(planStart, weekNumber);
+
+      // The single server-decided rattrapage (current week only). Every other past, uncompleted
+      // session is plain 'missed' and not actionable.
+      let eligibleRattrapage: Awaited<ReturnType<typeof findMostRecentOverdueSession>> = null;
+      if (hasLevelTemplatePlan && weekNumber === currentWeekNumber) {
+        try {
+          eligibleRattrapage = await findMostRecentOverdueSession({
+            userId,
+            levelDoc: level as any,
+            planStart,
+            durationWeeks,
+            now: new Date(),
+          });
+        } catch {
+          eligibleRattrapage = null;
+        }
+      }
 
       type DaySession = {
         sessionTemplateId: string;
@@ -1469,8 +1491,13 @@ router.get(
           if (isCompleted || isRattrapageOrig) {
             status = 'completed';
           } else if (isPast) {
-            // Rattrapage is ONLY valid during the SAME week (Requirement 4)
-            if (weekNumber === currentWeekNumber) {
+            // Rattrapage is ONLY the single server-selected session of the CURRENT week
+            if (
+              eligibleRattrapage &&
+              id === eligibleRattrapage.sessionTemplateId &&
+              (dateKeyStr === eligibleRattrapage.originalDate ||
+                dateTunisiaKeyStr === eligibleRattrapage.originalDate)
+            ) {
               status = 'rattrapage';
             } else {
               status = 'missed';
@@ -1560,7 +1587,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
     const planStart = normalizePlanStartDate(new Date((assignment as any).startDate));
     const planEnd = new Date((assignment as any).endDate);
     const durationWeeks = Number((assignment as any).durationWeeks);
-    const level = await LevelTemplate.findById((assignment as any).levelTemplateId).lean();
+    const { level } = await loadEffectiveLevel(userId, (assignment as any).levelTemplateId);
 
     const sessionIds = new Set<string>();
     for (const week of (level as any)?.weeks || []) {
@@ -1655,7 +1682,8 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
         durationWeeks,
         now: today,
       });
-      missedSeances = overdue.map((o) => ({
+      // Only the first missed session (server-decided) is exposed as actionable.
+      missedSeances = overdue.slice(0, 1).map((o) => ({
         weekIndex: o.weekNumber - 1,
         dayIndex: o.recommendedDayOffset,
         originalDate: o.originalDate,
@@ -1704,6 +1732,17 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
           }
         : null,
     });
+  } catch (e: unknown) {
+    res.status(500).json({ message: (e as Error).message });
+  }
+});
+
+// GET /api/me/plan/trace — flat, ID-based view of THIS client's effective schedule (same builder the admin trace uses)
+router.get('/plan/trace', async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+    res.json(await buildScheduleTrace(userId, new Date()));
   } catch (e: unknown) {
     res.status(500).json({ message: (e as Error).message });
   }
@@ -1883,7 +1922,9 @@ router.post(
         exercises = [],
         completionType = 'normal',
         originalScheduledDate,
+        workoutSessionId,
       }: {
+        workoutSessionId?: string;
         sessionTemplateId: string;
         durationSeconds?: number;
         exercises: Array<{
@@ -1928,6 +1969,18 @@ router.post(
       const ExerciseHistoryModel = require('../models/ExerciseHistory.model').default;
       const mongoose = require('mongoose');
 
+      // 20h window (server clock): expire stale sessions; never validate an expired one.
+      await expireStaleWorkoutSessions(userId, new Date());
+      if (workoutSessionId && mongoose.isValidObjectId(workoutSessionId)) {
+        const target = await WorkoutSessionModel.findOne({ _id: workoutSessionId, userId }).select('status').lean();
+        if (target && (target.status === 'expired' || target.status === 'abandoned')) {
+          return res.status(410).json({
+            code: 'WORKOUT_SESSION_EXPIRED',
+            message: 'Le délai de 20 heures pour terminer cette séance est dépassé.',
+          });
+        }
+      }
+
       // Check for existing completed session to ensure idempotency (Requirement 1)
       const existingCompleted = await WorkoutSessionModel.findOne({
         userId,
@@ -1950,6 +2003,22 @@ router.post(
           { $set: { status: 'completed', completedAt: existingCompleted.completedAt || new Date() } }
         );
         return res.json({ success: true, sessionId: existingCompleted._id, alreadyCompleted: true });
+      }
+
+      // Rattrapage is decided by the server: only the first missed session of the current week
+      // may be completed as rattrapage. Reject any other session id / date the client sends.
+      if (completionType === 'rattrapage' || originalScheduledDate) {
+        const eligible = await resolveEligibleRattrapage(userId, new Date());
+        if (!matchesEligibleRattrapage(eligible, sessionTemplateId, originalScheduledDate)) {
+          return res.status(409).json({
+            code: 'RATTRAPAGE_NOT_ELIGIBLE',
+            message: eligible
+              ? 'Cette séance ne peut pas être rattrapée. Seule la première séance manquée de la semaine est disponible.'
+              : 'Aucun rattrapage disponible pour la semaine en cours.',
+            eligibleSessionTemplateId: eligible?.sessionTemplateId ?? null,
+            eligibleOriginalDate: eligible?.originalDate ?? null,
+          });
+        }
       }
 
       // Check if there is an active session in progress to complete instead of creating duplicate

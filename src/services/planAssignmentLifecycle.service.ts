@@ -97,13 +97,22 @@ export async function createPlanAssignment(params: {
   const start = params.startDate;
   const status = start.getTime() > today.getTime() ? 'scheduled' : 'active';
 
+  // Idempotency: a double-submit / retry of the same assignment must not create a second row.
+  const duplicate = await PlanAssignment.findOne({
+    userId: params.userId,
+    levelTemplateId: params.planTemplateId,
+    startDate: start,
+    status: { $in: ['active', 'scheduled'] },
+    createdAt: { $gte: new Date(Date.now() - 60_000) },
+  });
+  if (duplicate) return { assignment: duplicate, plan };
+
   if (status === 'active') {
-    const current = await PlanAssignment.findOne({ userId: params.userId, status: 'active' });
-    if (current) {
-      current.status = params.action === 'replace' ? 'replaced' : 'completed';
-      current.archivedAt = new Date();
-      await current.save();
-    }
+    // Close EVERY active assignment (not just one) so two active rows can never coexist.
+    await PlanAssignment.updateMany(
+      { userId: params.userId, status: 'active' },
+      { $set: { status: params.action === 'replace' ? 'replaced' : 'completed', archivedAt: new Date() } },
+    );
   }
   if (status === 'scheduled') {
     await PlanAssignment.updateMany(

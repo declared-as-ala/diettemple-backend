@@ -5,6 +5,7 @@
  * one implementation of "did this week pass".
  */
 import LevelTemplate from '../models/LevelTemplate.model';
+import { loadEffectiveLevel } from './clientSchedule.service';
 import PlanAssignment from '../models/PlanAssignment.model';
 import WorkoutSession from '../models/WorkoutSession.model';
 import { utcDateKey, getWeekWindow } from '../utils/scheduleDate';
@@ -136,7 +137,7 @@ export async function calculateTrainingWeekProgress(
   }).lean();
   if (!assignment) return null;
 
-  const level = await LevelTemplate.findById((assignment as any).levelTemplateId).lean();
+  const { level } = await loadEffectiveLevel(userId, (assignment as any).levelTemplateId);
   if (!level) return null;
 
   const week = (level as any).weeks?.find((w: any) => w.weekNumber === weekNumber) ?? null;

@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import DailyNutritionLog from '../models/DailyNutritionLog.model';
 import WorkoutSession from '../models/WorkoutSession.model';
 import WeeklySummary from '../models/WeeklySummary.model';
+import { loadEffectiveLevel } from './clientSchedule.service';
 import { getCurrentWeekNumber, getWeekWindow, resolveWeekSessions } from './planSchedule.service';
 import { utcDateKey } from '../utils/scheduleDate';
 import { businessDateAsUtcCalendarDate } from '../utils/businessDate';
@@ -81,7 +82,7 @@ export async function calculateWeeklyValidation(
     ({ weekStart, weekEnd } = getWeekWindow(assignmentStart, weekNumber));
 
     planId = assignment.levelTemplateId;
-    const plan = await LevelTemplate.findById(assignment.levelTemplateId).lean();
+    const { level: plan } = await loadEffectiveLevel(userId, assignment.levelTemplateId);
     if (plan) {
       const week = (plan as any).weeks?.find((w: any) => w.weekNumber === weekNumber);
       const orderedSessions = resolveWeekSessions(week);
