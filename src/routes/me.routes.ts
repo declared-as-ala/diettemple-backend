@@ -1622,21 +1622,24 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
       const minimumCompletedSessions = isRestWeekFlag
         ? 0
         : w?.minimumCompletedSessions ?? (level as any)?.minimumSessionsPerWeek ?? orderedSessionsForWeek.length;
+      // Calendar weeks (same rule as /plan/week, /today and rattrapage): each weekday slot maps to the REAL date
+      // of that weekday inside this program week. Slots before a mid-week plan start have no date and are not scheduled.
+      const dateByDayKey = new Map<string, string>();
+      for (const d of getProgramWeekDates(planStart, weekIdx + 1)) dateByDayKey.set(getPlanDayKeyForDate(d), utcDateKey(d));
       const days = PLAN_DAY_KEYS.map((dayKey, dayIdx) => {
         const placements = w?.days?.[dayKey] || [];
         const first = placements[0];
-        const sessionId = first?.sessionTemplateId ? String(first.sessionTemplateId) : null;
-        const dayDate = new Date(planStart.getTime() + (weekIdx * 7 + dayIdx) * MS_PER_DAY);
-        const dateKey = utcDateKey(dayDate);
+        const dateKey = dateByDayKey.get(dayKey) ?? null;
+        const sessionId = dateKey && first?.sessionTemplateId ? String(first.sessionTemplateId) : null;
         const sessionDoc = sessionId ? sessionMap.get(sessionId) : null;
         const isRestDay = !sessionId;
         if (!isRestDay) {
           totalScheduledSessions += 1;
-          if (completedByDateKey.has(dateKey)) completedSessions += 1;
+          if (completedByDateKey.has(dateKey as string)) completedSessions += 1;
         }
 
         return {
-          dayIndex: dayIdx,
+          dayIndex: dayIdx, // 0 = Monday ... 6 = Sunday
           date: dateKey,
           isRestDay,
           seance: !isRestDay

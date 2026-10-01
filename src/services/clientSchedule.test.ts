@@ -220,6 +220,26 @@ describe('client schedule: one resolver for admin and mobile', () => {
   });
 });
 
+describe('regression: client starting Tuesday 22 Sep (screenshots), Week 4 = 12-18 Oct', () => {
+  it('admin Week 4 (Push J0, Pull J1, Legs J3, UpperC J4) lands Mon/Tue/Thu/Fri 12/13/15/16 Oct; Wed/Sat/Sun are rest', async () => {
+    mockTemplates();
+    mockNoCompletions();
+    mockOverride(null);
+    mockLevel(plan());
+    (resolveWorkoutAssignment as jest.Mock).mockResolvedValue(assignment('2026-09-22T00:00:00Z') as never);
+    const { rows } = await buildScheduleTrace('u1');
+    const w4 = rows.filter((r) => r.weekNumber === 4);
+    expect(w4.map((r) => [r.scheduledDate, r.sessionName])).toEqual([
+      ['2026-10-12', NAMES.push],
+      ['2026-10-13', NAMES.pull],
+      ['2026-10-15', NAMES.legs],
+      ['2026-10-16', NAMES.upper],
+    ]);
+    // the old relative formula (planStart + 7*week + idx) put Push on 13 Oct, Pull on 14, Legs on 16, UpperC on 17
+    expect(w4.find((r) => r.scheduledDate === '2026-10-13')!.sessionName).toBe(NAMES.pull);
+  });
+});
+
 describe('Europe/Tunis day boundary', () => {
   beforeEach(() => {
     jest.clearAllMocks();
