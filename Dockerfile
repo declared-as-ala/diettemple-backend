@@ -40,4 +40,5 @@ COPY *.json ./
 
 EXPOSE 5000
 
-CMD ["node", "dist/index.js"]
+# TEMPORARY (one deploy): apply the food catalog (idempotent upserts, never deletes). Remove after it has run once.
+CMD ["sh", "-c", "node dist/scripts/seedFoodCatalog.js || echo '[food-catalog] seed failed, continuing'; exec node dist/index.js"]

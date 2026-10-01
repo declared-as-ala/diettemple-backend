@@ -92,7 +92,12 @@ function safeNone(): GeminiGymResult {
   };
 }
 
-async function callGeminiVision(prompt: string, buffer: Buffer, mime: string): Promise<string | null> {
+async function callGeminiVision(
+  prompt: string,
+  buffer: Buffer,
+  mime: string,
+  opts: { maxOutputTokens?: number; timeoutMs?: number } = {}
+): Promise<string | null> {
   const requestId = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   if (!GEMINI_API_KEY) {
     console.warn(`[gemini-vision] requestId=${requestId} GEMINI_API_KEY missing`);
@@ -100,7 +105,7 @@ async function callGeminiVision(prompt: string, buffer: Buffer, mime: string): P
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(GEMINI_API_URL, {
       method: 'POST',
@@ -118,7 +123,7 @@ async function callGeminiVision(prompt: string, buffer: Buffer, mime: string): P
         }],
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 2048,
+          maxOutputTokens: opts.maxOutputTokens ?? 2048,
           responseMimeType: 'application/json',
         },
       }),
@@ -202,6 +207,27 @@ export async function analyzeMealWithGemini(imageBuffer: Buffer, mime = 'image/j
   }
   const parsed = parseMealResponse(content);
   return parsed || { ok: false, code: 'parse_error', message: 'Réponse IA illisible. Réessaie ou ajoute les aliments manuellement.' };
+}
+
+const MEAL_V2_TIMEOUT_MS = parseInt(process.env.GEMINI_MEAL_TIMEOUT_MS || '25000', 10) || 25_000;
+
+/** Meal analysis v2: structured JSON (dish/ingredients, natural unit, estimate). Nutrition is NOT taken from the model. */
+export async function analyzeMealV2(
+  imageBuffer: Buffer,
+  mime = 'image/jpeg',
+  knownDishes: string[] = []
+): Promise<{ ok: true; meal: import('./mealScanPipeline').AiMeal } | MealDetectionFailure> {
+  const { buildMealPrompt, parseMealV2 } = await import('./mealScanPipeline');
+  const normalizedMime = ['image/png', 'image/webp'].includes(mime) ? mime : 'image/jpeg';
+  const content = await callGeminiVision(buildMealPrompt(knownDishes), imageBuffer, normalizedMime, {
+    maxOutputTokens: 4096,
+    timeoutMs: MEAL_V2_TIMEOUT_MS,
+  });
+  if (!content) {
+    return { ok: false, code: 'provider_error', message: 'Analyse IA indisponible pour le moment. Tu peux ajouter les aliments manuellement.' };
+  }
+  const meal = parseMealV2(content);
+  return meal ? { ok: true, meal } : { ok: false, code: 'parse_error', message: 'Réponse IA illisible. Réessaie ou ajoute les aliments manuellement.' };
 }
 
 async function prepareGymImage(imagePath: string): Promise<Buffer> {

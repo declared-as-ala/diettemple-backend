@@ -815,10 +815,12 @@ router.post(
       const resized = await resizeMealImageIfNeeded(imageBuffer, validation.mime);
       if (resized !== imageBuffer) imageBuffer = resized;
 
-      const { analyzeMealWithGemini } = await import('../lib/geminiVision.service');
-      const { searchSuggestedFoods } = await import('../lib/mealScanVision');
+      const { analyzeMealV2 } = await import('../lib/geminiVision.service');
+      const { buildScanResponse } = await import('../lib/mealScanPipeline');
+      const { matchFood } = await import('../lib/foodMatcher');
+      const { getKnownTunisianDishes } = await import('../lib/foodCatalogCache');
 
-      const result = await analyzeMealWithGemini(imageBuffer, validation.mime);
+      const result = await analyzeMealV2(imageBuffer, validation.mime, await getKnownTunisianDishes());
 
       if (!result.ok) {
         return res.status(503).json({
@@ -829,46 +831,8 @@ router.post(
         });
       }
 
-      const itemsWithSuggestions = await Promise.all(
-        result.items.map(async (item) => {
-          const suggestedFoods = await searchSuggestedFoods(item.label, 3);
-          const fromDb = suggestedFoods.map((f) => ({
-            foodId: f.foodId,
-            name: f.name,
-            macrosPer100g: f.macrosPer100g,
-          }));
-          // If no DB match but AI returned macros, add one suggestion with AI macros so frontend can show macros
-          if (fromDb.length === 0 && item.macrosPer100g) {
-            fromDb.push({
-              foodId: '',
-              name: item.label,
-              macrosPer100g: item.macrosPer100g,
-            });
-          }
-          return {
-            label: item.label,
-            confidence: item.confidence,
-            category: item.category,
-            defaultGrams: item.defaultGrams,
-            suggestedFoods: fromDb,
-            macrosPer100g: item.macrosPer100g ?? (fromDb[0] as any)?.macrosPer100g ?? undefined,
-          };
-        })
-      );
-
-      let notes = result.notes;
-      if (itemsWithSuggestions.length === 0) {
-        notes = 'Aucun aliment détecté clairement. Réessaie avec une photo plus nette ou ajoute manuellement.';
-      } else if (notes.indexOf('Détection') === -1 && notes.indexOf('Vérifie') === -1) {
-        notes = 'Détection IA terminée. Vérifie les aliments et ajuste les quantités.';
-      }
-
-      const payload: Record<string, unknown> = {
-        ok: true,
-        source: result.source,
-        items: itemsWithSuggestions,
-        notes,
-      };
+      // AI = what/how many. Database = nutrition. Units, suggestions and totals are computed deterministically.
+      const payload: Record<string, unknown> = { ...(await buildScanResponse(result.meal, matchFood)) };
       if (req.body?.dateKey) payload.dateKey = req.body.dateKey;
 
       return res.json(payload);
@@ -907,15 +871,34 @@ router.post(
       const dateKey = req.params.dateKey as string;
       const date = parseDateKey(dateKey);
       const photoUrl = req.body.photoUrl;
-      const items = (req.body.items || []).map((it: any) => ({
-        foodId: it.foodId ? it.foodId : undefined,
-        name: it.name,
-        grams: Number(it.grams),
-        kcal: Number(it.kcal),
-        protein: Number(it.protein),
-        carbs: Number(it.carbs),
-        fat: Number(it.fat),
-      }));
+      const FoodModel = (await import('../models/Food.model')).default;
+      const { macrosForGrams } = await import('../lib/portion');
+      const items = await Promise.all(
+        (req.body.items || []).map(async (it: any) => {
+          const item: any = {
+            foodId: it.foodId ? it.foodId : undefined,
+            name: it.name,
+            grams: Number(it.grams),
+            kcal: Number(it.kcal),
+            protein: Number(it.protein),
+            carbs: Number(it.carbs),
+            fat: Number(it.fat),
+            ...(it.fiber != null ? { fiber: Number(it.fiber) } : {}),
+            ...(typeof it.unit === 'string' ? { unit: it.unit } : {}),
+            ...(it.quantity != null && Number.isFinite(Number(it.quantity)) ? { quantity: Number(it.quantity) } : {}),
+            nutritionSource: it.foodId ? 'database' : it.nutritionSource === 'ai_estimate' ? 'ai_estimate' : 'manual',
+          };
+          // Nutrition for a database food is always derived from grams on the server (deterministic, tamper-proof).
+          if (it.foodId && (await import('mongoose')).default.isValidObjectId(String(it.foodId))) {
+            const food: any = await FoodModel.findById(String(it.foodId)).select('macrosPer100g').lean();
+            if (food?.macrosPer100g) {
+              const m = macrosForGrams(item.grams, food.macrosPer100g);
+              Object.assign(item, { kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber });
+            }
+          }
+          return item;
+        })
+      );
 
       let log = await DailyNutritionLog.findOne({ userId, date }).lean();
       const entryId = new (await import('mongoose')).default.Types.ObjectId();

@@ -12,6 +12,7 @@
     "seed:training": "ts-node src/scripts/seedTraining.ts",
     "seed:home": "ts-node src/scripts/seedHomeData.ts",
     "seed:6week": "ts-node src/scripts/seed6WeekProgram.ts",
+    "seed:food-catalog": "ts-node src/scripts/seedFoodCatalog.ts",
     "seed:fitness": "ts-node src/scripts/seedFitnessData.ts",
     "seed:exercises": "ts-node src/scripts/seedExercises.ts",
     "seed:sessions": "ts-node src/scripts/seedSessionTemplates.ts",

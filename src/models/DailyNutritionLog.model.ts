@@ -8,6 +8,12 @@ export interface ILogEntryItem {
   protein: number;
   carbs: number;
   fat: number;
+  fiber?: number;
+  /** Natural unit the user chose (piece, bowl, g...) and how many of it. grams stays the source for macros. */
+  unit?: string;
+  quantity?: number;
+  /** 'database' = computed from a Food record; 'ai_estimate' / 'manual' = not verified. */
+  nutritionSource?: 'database' | 'ai_estimate' | 'manual';
 }
 
 export interface ILogEntry {
@@ -41,6 +47,10 @@ const LogEntryItemSchema = new Schema(
     protein: { type: Number, required: true },
     carbs: { type: Number, required: true },
     fat: { type: Number, required: true },
+    fiber: { type: Number },
+    unit: { type: String },
+    quantity: { type: Number },
+    nutritionSource: { type: String, enum: ['database', 'ai_estimate', 'manual'] },
   },
   { _id: false }
 );
