@@ -24,6 +24,8 @@ import type { ILevelTemplate } from '../models/LevelTemplate.model';
 import { resolveWorkoutAssignment } from './workoutAssignment.service';
 import { businessDateAsUtcCalendarDate, businessDateKey } from '../utils/businessDate';
 
+const IN_PROGRESS_WINDOW_MS = 20 * 60 * 60 * 1000;
+
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export interface OverdueSession {
@@ -35,6 +37,27 @@ export interface OverdueSession {
   dayName: string;
   recommendedAt: Date;
   dueAt: Date;
+}
+
+/**
+ * Sessions started but not finished that are still inside their 20h continuation window are IN PROGRESS:
+ * not completed, but also NOT missed / rattrapage yet. Keys are `sessionTemplateId|startDay`.
+ * After the window they stop being listed here, so they fall back to the normal missed -> rattrapage rules.
+ */
+async function loadInProgressKeys(userId: unknown, now: Date): Promise<Set<string>> {
+  const cutoff = new Date(now.getTime() - IN_PROGRESS_WINDOW_MS);
+  const docs = await WorkoutSession.find({ userId, status: 'active', startedAt: { $gt: cutoff } })
+    .select('sessionId date startedAt')
+    .lean();
+  const keys = new Set<string>();
+  for (const doc of docs as Array<{ sessionId?: unknown; date?: Date; startedAt?: Date }>) {
+    if (!doc?.sessionId || !doc.startedAt) continue; // only real in-progress records carry a start time
+    if (new Date(doc.startedAt).getTime() <= cutoff.getTime()) continue;
+    const day = new Date(doc.date ?? doc.startedAt);
+    keys.add(`${String(doc.sessionId)}|${utcDateKey(day)}`);
+    keys.add(`${String(doc.sessionId)}|${tunisiaDateKey(day)}`);
+  }
+  return keys;
 }
 
 async function loadCompletionKeys(
@@ -110,6 +133,8 @@ export async function findOverdueSessions(params: {
     new Date(now.getTime() + 7 * MS_PER_DAY)
   );
 
+  const inProgressKeys = await loadInProgressKeys(userId, now);
+
   const catchUpWindowHours = levelDoc.catchUpWindowHours ?? 48;
   const results: OverdueSession[] = [];
 
@@ -142,6 +167,9 @@ export async function findOverdueSessions(params: {
         catchUpOriginalKeys.has(`${sid}|${dateUtcKey}`);
 
       if (isCompleted) continue;
+
+      // Started and still resumable (<20h): in progress, not missed.
+      if (inProgressKeys.has(`${sid}|${dateTunisiaKey}`) || inProgressKeys.has(`${sid}|${dateUtcKey}`)) continue;
 
       const matchedOrdered = orderedSessions.find((s) => String(s.sessionTemplateId) === sid);
       const recommendedAt = date;

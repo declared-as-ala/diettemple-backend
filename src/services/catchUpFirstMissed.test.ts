@@ -33,6 +33,35 @@ const mock = (list: any[]) =>
 const first = (now: string) =>
   findMostRecentOverdueSession({ userId, levelDoc, planStart, durationWeeks: 2, now: new Date(now) });
 
+describe('in-progress session (20h window) is not a rattrapage', () => {
+  beforeEach(() => { jest.clearAllMocks(); });
+  const find = (completed: any[], active: any[]) =>
+    (WorkoutSession.find as jest.Mock)
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(completed) }) })
+      .mockReturnValueOnce({ select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(active) }) });
+
+  it('S1 started Mon 15:00 and left; on Tue 09:00 (18h later) S1 is IN PROGRESS, not rattrapage', async () => {
+    const startedAt = new Date('2026-09-14T15:00:00Z');
+    find([], [{ sessionId: 'w1s1', date: startedAt, startedAt }]);
+    const all = await findOverdueSessions({ userId, levelDoc, planStart, durationWeeks: 2, now: new Date('2026-09-15T09:00:00Z') });
+    expect(all.map((o) => o.sessionTemplateId)).not.toContain('w1s1');
+  });
+
+  it('after 20h without finishing it is NOT validated: it becomes a normal rattrapage again', async () => {
+    const startedAt = new Date('2026-09-14T15:00:00Z');
+    find([], [{ sessionId: 'w1s1', date: startedAt, startedAt }]);
+    const all = await findOverdueSessions({ userId, levelDoc, planStart, durationWeeks: 2, now: new Date('2026-09-15T11:30:00Z') }); // 20h30 later
+    expect(all[0].sessionTemplateId).toBe('w1s1');
+  });
+
+  it('completing it (completed doc dated at its start day) clears it for good', async () => {
+    const startedAt = new Date('2026-09-14T15:00:00Z');
+    find([{ sessionId: 'w1s1', date: startedAt }], []);
+    const all = await findOverdueSessions({ userId, levelDoc, planStart, durationWeeks: 2, now: new Date('2026-09-15T09:00:00Z') });
+    expect(all.map((o) => o.sessionTemplateId)).not.toContain('w1s1');
+  });
+});
+
 describe('first-missed-session rattrapage', () => {
   beforeEach(() => { jest.clearAllMocks(); });
 
