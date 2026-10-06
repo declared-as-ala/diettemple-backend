@@ -128,6 +128,7 @@ export async function createPlanAssignment(params: {
     durationWeeks,
     durationWeeksSnapshot: durationWeeks,
     durationDaysSnapshot: durationWeeks * 7,
+    scheduleMode: 'relative',
     status,
     assignedBy: params.adminId,
     assignedAt: new Date(),

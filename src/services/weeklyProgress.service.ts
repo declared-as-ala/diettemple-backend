@@ -145,7 +145,8 @@ export async function calculateTrainingWeekProgress(
   const isRestWeek = !!week?.isRestWeek;
 
   const planStart = businessDateAsUtcCalendarDate(new Date((assignment as any).startDate));
-  const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber);
+  const scheduleMode = (assignment as any).scheduleMode;
+  const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber, scheduleMode);
   const catchUpWindowHours =
     (level as any).catchUpWindowHours ?? DEFAULT_CATCH_UP_WINDOW_HOURS;
   const minimumRestHoursBetweenSessions =
@@ -177,7 +178,7 @@ export async function calculateTrainingWeekProgress(
       planStart,
       weekNumber,
       s,
-      { catchUpWindowHours }
+      { catchUpWindowHours, scheduleMode }
     );
     const completion = completionByTemplateId.get(sid) ?? null;
     const status = computeSessionStatus({

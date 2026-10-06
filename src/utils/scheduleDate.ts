@@ -57,6 +57,26 @@ export function diffDaysUtc(target: Date, from: Date): number {
   return Math.floor((utcStartOfCalendarDate(target) - utcStartOfCalendarDate(from)) / MS_PER_DAY);
 }
 
+/**
+ * Schedule modes:
+ *  - 'calendar' (legacy, existing assignments): weeks are Monday-Sunday, Week 1 is partial; slot "mon"=J0 is a real Monday.
+ *  - 'relative' (new assignments): a week is 7 days counted from the client's start day and slot J0 ("mon" key)
+ *    lands ON the start day, J1 the next day, ... so Session 1 always starts the plan.
+ *
+ * Relative mode is the calendar maths applied to a day axis shifted back so the start day acts as "Monday".
+ */
+export type ScheduleMode = 'calendar' | 'relative';
+
+export function normalizeScheduleMode(mode: unknown): ScheduleMode {
+  return mode === 'relative' ? 'relative' : 'calendar';
+}
+
+/** Days between the start day and the Monday of its week (0 for calendar mode). */
+export function relativeShiftDays(planStart: Date, mode?: ScheduleMode | string | null): number {
+  if (mode !== 'relative') return 0;
+  return (new Date(utcStartOfCalendarDate(planStart)).getUTCDay() + 6) % 7;
+}
+
 /** Get the weekday key ('mon'..'sun') for a given UTC calendar date. */
 export function getPlanDayKeyForDate(d: Date): PlanDayKey {
   const dow = new Date(utcStartOfCalendarDate(d)).getUTCDay();
@@ -89,20 +109,26 @@ export function getProgramWeekInfo(planStart: Date) {
  * - Week 1: [planStart, week1Sunday + 1 day)
  * - Week 2..N: [week2Monday + (weekNumber - 2) * 7 days, + 7 days)
  */
-export function getWeekWindow(planStart: Date, weekNumber: number): { weekStart: Date; weekEnd: Date } {
-  const { startMs, week1SundayMs, week2MondayMs } = getProgramWeekInfo(planStart);
+export function getWeekWindow(
+  planStart: Date,
+  weekNumber: number,
+  mode?: ScheduleMode | string | null
+): { weekStart: Date; weekEnd: Date } {
+  const k = relativeShiftDays(planStart, mode) * MS_PER_DAY;
+  const base = k ? new Date(utcStartOfCalendarDate(planStart) - k) : planStart;
+  const { startMs, week1SundayMs, week2MondayMs } = getProgramWeekInfo(base);
   if (weekNumber <= 1) {
     return {
-      weekStart: new Date(startMs),
-      weekEnd: new Date(week1SundayMs + MS_PER_DAY),
+      weekStart: new Date(startMs + k),
+      weekEnd: new Date(week1SundayMs + MS_PER_DAY + k),
     };
   }
   const offsetWeeks = weekNumber - 2;
   const weekStartMs = week2MondayMs + offsetWeeks * 7 * MS_PER_DAY;
   const weekEndMs = weekStartMs + 7 * MS_PER_DAY;
   return {
-    weekStart: new Date(weekStartMs),
-    weekEnd: new Date(weekEndMs),
+    weekStart: new Date(weekStartMs + k),
+    weekEnd: new Date(weekEndMs + k),
   };
 }
 
@@ -111,8 +137,8 @@ export function getWeekWindow(planStart: Date, weekNumber: number): { weekStart:
  * - Week 1: only dates from planStart through the following Sunday.
  * - Week 2..N: 7 dates (Monday through Sunday).
  */
-export function getProgramWeekDates(planStart: Date, weekNumber: number): Date[] {
-  const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber);
+export function getProgramWeekDates(planStart: Date, weekNumber: number, mode?: ScheduleMode | string | null): Date[] {
+  const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber, mode);
   const dates: Date[] = [];
   let curMs = utcStartOfCalendarDate(weekStart);
   const endMs = utcStartOfCalendarDate(weekEnd);
@@ -129,12 +155,15 @@ export function getProgramWeekDates(planStart: Date, weekNumber: number): Date[]
  */
 export function getPlanDayPosition(
   target: Date,
-  planStart: Date
+  planStart: Date,
+  mode?: ScheduleMode | string | null
 ): { diffDays: number; weekIndex: number; dayIndex: number } {
-  const { startMs, week1SundayMs, week2MondayMs } = getProgramWeekInfo(planStart);
+  const k = relativeShiftDays(planStart, mode) * MS_PER_DAY;
+  const base = k ? new Date(utcStartOfCalendarDate(planStart) - k) : planStart;
+  const { startMs, week1SundayMs, week2MondayMs } = getProgramWeekInfo(base);
   // `target` may be a real instant (e.g. 23:30Z = 00:30 next day in Tunis): use its Africa/Tunis calendar day.
   // Calendar dates already stored as UTC midnight map to themselves.
-  const targetMs = utcStartOfCalendarDate(businessDateAsUtcCalendarDate(target));
+  const targetMs = utcStartOfCalendarDate(businessDateAsUtcCalendarDate(target)) - k;
   const diffDays = Math.floor((targetMs - startMs) / MS_PER_DAY);
 
   if (targetMs < startMs) {
@@ -153,6 +182,15 @@ export function getPlanDayPosition(
   const weekIndex = 1 + week2Offset;
   const dayIndex = ((diffFromWeek2 % 7) + 7) % 7; // 0 = Mon, ..., 6 = Sun
   return { diffDays, weekIndex, dayIndex };
+}
+
+/**
+ * The days{} slot key ('mon' = J0 ... 'sun' = J6) that applies to a real date.
+ * calendar: the real weekday. relative: the offset from the client's start day within its 7-day week.
+ */
+export function getSlotKeyForDate(d: Date, planStart: Date, mode?: ScheduleMode | string | null): PlanDayKey {
+  const k = relativeShiftDays(planStart, mode) * MS_PER_DAY;
+  return getPlanDayKeyForDate(k ? new Date(utcStartOfCalendarDate(d) - k) : d);
 }
 
 /** Maps a 0-6 day offset (within a 7-day Monday-start week) onto the legacy positional day key (0 = mon). */

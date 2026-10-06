@@ -16,7 +16,7 @@ import {
   tunisiaDateKey,
   getPlanDayPosition,
   getProgramWeekDates,
-  getPlanDayKeyForDate,
+  getSlotKeyForDate,
   MS_PER_DAY,
 } from '../utils/scheduleDate';
 import { loadEffectiveLevel } from './clientSchedule.service';
@@ -89,17 +89,19 @@ export async function findOverdueSessions(params: {
   durationWeeks: number;
   now: Date;
   lookbackDays?: number;
+  /** 'relative' (J0 = start day) or legacy 'calendar'. */
+  scheduleMode?: string | null;
 }): Promise<OverdueSession[]> {
-  const { userId, levelDoc, planStart, durationWeeks, now } = params;
+  const { userId, levelDoc, planStart, durationWeeks, now, scheduleMode } = params;
   if (!levelDoc?.weeks?.length) return [];
 
   // Determine the current program week (1-indexed)
-  const { weekIndex } = getPlanDayPosition(now, planStart);
+  const { weekIndex } = getPlanDayPosition(now, planStart, scheduleMode);
   if (weekIndex < 0 || weekIndex >= durationWeeks) return [];
   const currentWeekN = weekIndex + 1;
 
   // Query completed sessions from planStart through end of current week
-  const weekDates = getProgramWeekDates(planStart, currentWeekN);
+  const weekDates = getProgramWeekDates(planStart, currentWeekN, scheduleMode);
   if (weekDates.length === 0) return [];
 
   const { onTimeKeys, catchUpOriginalKeys } = await loadCompletionKeys(
@@ -125,7 +127,7 @@ export async function findOverdueSessions(params: {
       continue;
     }
 
-    const dayKey = getPlanDayKeyForDate(date);
+    const dayKey = getSlotKeyForDate(date, planStart, scheduleMode);
     const placements = (week?.days as any)?.[dayKey] || [];
 
     for (const placement of placements) {
@@ -196,6 +198,7 @@ export async function resolveEligibleRattrapage(
     planStart: businessDateAsUtcCalendarDate(new Date((assignment as any).startDate)),
     durationWeeks: Number((assignment as any).durationWeeks),
     now,
+    scheduleMode: (assignment as any).scheduleMode,
   });
 }
 

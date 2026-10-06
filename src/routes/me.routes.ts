@@ -35,6 +35,7 @@ import {
   getWeekWindow,
   getProgramWeekDates,
   getPlanDayKeyForDate,
+  getSlotKeyForDate,
 } from '../utils/scheduleDate';
 import { serializeExerciseVideo, serializeExerciseVideosDeep } from '../utils/exerciseVideo';
 import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
@@ -349,10 +350,10 @@ router.get(
           !!levelDoc && Array.isArray((levelDoc as any).weeks) && (levelDoc as any).weeks.length > 0;
 
         if (hasLevelTemplatePlan) {
-          const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, effectivePlanStart);
+          const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, effectivePlanStart, (planAssignment as any)?.scheduleMode);
           if (diffDays >= 0 && weekIndex < assignmentDurationWeeks) {
             weekNumber = weekIndex + 1;
-            const templateDayKey = getPlanDayKeyForDate(today);
+            const templateDayKey = getSlotKeyForDate(today, effectivePlanStart, (planAssignment as any)?.scheduleMode);
             const week = (levelDoc as any)?.weeks?.find((w: any) => w.weekNumber === weekNumber);
             const placements = week?.days?.[templateDayKey] || [];
             const firstPlacement = placements[0];
@@ -373,6 +374,7 @@ router.get(
                 const schedule = matchedOrdered
                   ? computeSessionSchedule(effectivePlanStart!, weekNumber, matchedOrdered, {
                       catchUpWindowHours: (levelDoc as any)?.catchUpWindowHours,
+                      scheduleMode: (planAssignment as any)?.scheduleMode,
                     })
                   : null;
                 todaySession = {
@@ -481,6 +483,7 @@ router.get(
             planEndDate: resolvedPlanEnd,
             durationWeeks: assignmentDurationWeeks,
             planAssignmentId: planAssignment ? String((planAssignment as any)._id) : null,
+            scheduleMode: (planAssignment as any)?.scheduleMode ?? 'calendar',
           }
         : null;
 
@@ -553,6 +556,7 @@ router.get(
             planStart: effectivePlanStart,
             durationWeeks: assignmentDurationWeeks,
             now: today,
+            scheduleMode: (planAssignment as any)?.scheduleMode,
           });
           if (missed) {
             // Verify authoritative completion record: A completed session must NEVER appear as rattrapage
@@ -1023,8 +1027,8 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
       : sub
         ? new Date((sub as any).startAt)
         : now;
-    const weekNumber = getCurrentWeekNumber(anchorStart, planAssignment?.durationWeeks || 1, now);
-    const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
+    const weekNumber = getCurrentWeekNumber(anchorStart, planAssignment?.durationWeeks || 1, now, (planAssignment as any)?.scheduleMode);
+    const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber, (planAssignment as any)?.scheduleMode);
 
     let planned = 0;
     let levelName: string | null = null;
@@ -1138,12 +1142,13 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
     if (typeof rawWeekNumber === 'number' && !Number.isNaN(rawWeekNumber)) {
       weekNumber = Math.min(durationWeeks, Math.max(1, rawWeekNumber));
     } else {
-      weekNumber = getCurrentWeekNumber(anchorStart, durationWeeks, inputDate);
+      weekNumber = getCurrentWeekNumber(anchorStart, durationWeeks, inputDate, (planAssignment as any)?.scheduleMode);
     }
 
-    const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber);
-    const weekDates = getProgramWeekDates(anchorStart, weekNumber);
-    const currentActiveWeekNumber = getCurrentWeekNumber(anchorStart, durationWeeks, new Date());
+    const modeV = (planAssignment as any)?.scheduleMode;
+    const { weekStart, weekEnd } = getWeekWindow(anchorStart, weekNumber, modeV);
+    const weekDates = getProgramWeekDates(anchorStart, weekNumber, modeV);
+    const currentActiveWeekNumber = getCurrentWeekNumber(anchorStart, durationWeeks, new Date(), modeV);
 
     // Resolve template / week sessions
     const { level } = planAssignment
@@ -1175,7 +1180,7 @@ router.get('/weekly-validation', async (req: AuthRequest, res: Response) => {
 
     const rawDays = [];
     for (const dayDate of weekDates) {
-      const dayKey = getPlanDayKeyForDate(dayDate);
+      const dayKey = getSlotKeyForDate(dayDate, anchorStart, modeV);
       const dateKey = utcDateKey(dayDate);
       const dateTunisiaKey = tunisiaDateKey(dayDate);
       const dow = dayDate.getUTCDay();
@@ -1353,7 +1358,8 @@ router.get(
         ? 0
         : week?.minimumCompletedSessions ?? (level as any)?.minimumSessionsPerWeek ?? orderedSessions.length;
 
-      const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber);
+      const modeW = (assignment as any).scheduleMode;
+      const { weekStart, weekEnd } = getWeekWindow(planStart, weekNumber, modeW);
       const weekStartDate = weekStart;
       const weekEndDate = new Date(weekEnd.getTime() - 1);
       const { sessionsByDateKey: completedSessionsByDateKey, completedOriginalDateKeys } =
@@ -1374,8 +1380,8 @@ router.get(
 
       const nowTunisiaKey = tunisiaDateKey(new Date());
       const nowUtcKey = utcDateKey(new Date());
-      const currentWeekNumber = getCurrentWeekNumber(planStart, durationWeeks, new Date());
-      const weekDates = getProgramWeekDates(planStart, weekNumber);
+      const currentWeekNumber = getCurrentWeekNumber(planStart, durationWeeks, new Date(), modeW);
+      const weekDates = getProgramWeekDates(planStart, weekNumber, modeW);
 
       // The single server-decided rattrapage (current week only). Every other past, uncompleted
       // session is plain 'missed' and not actionable.
@@ -1388,6 +1394,7 @@ router.get(
             planStart,
             durationWeeks,
             now: new Date(),
+            scheduleMode: modeW,
           });
         } catch {
           eligibleRattrapage = null;
@@ -1412,7 +1419,7 @@ router.get(
       }> = [];
 
       for (const dayStart of weekDates) {
-        const dayKey = getPlanDayKeyForDate(dayStart);
+        const dayKey = getSlotKeyForDate(dayStart, planStart, modeW);
         const dateKeyStr = utcDateKey(dayStart);
         const dateTunisiaKeyStr = tunisiaDateKey(dayStart);
         const isPast = dateKeyStr < nowUtcKey && dateTunisiaKeyStr < nowTunisiaKey;
@@ -1608,7 +1615,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
       // Calendar weeks (same rule as /plan/week, /today and rattrapage): each weekday slot maps to the REAL date
       // of that weekday inside this program week. Slots before a mid-week plan start have no date and are not scheduled.
       const dateByDayKey = new Map<string, string>();
-      for (const d of getProgramWeekDates(planStart, weekIdx + 1)) dateByDayKey.set(getPlanDayKeyForDate(d), utcDateKey(d));
+      for (const d of getProgramWeekDates(planStart, weekIdx + 1, (assignment as any).scheduleMode)) dateByDayKey.set(getSlotKeyForDate(d, planStart, (assignment as any).scheduleMode), utcDateKey(d));
       const days = PLAN_DAY_KEYS.map((dayKey, dayIdx) => {
         const placements = w?.days?.[dayKey] || [];
         const first = placements[0];
@@ -1646,7 +1653,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
     });
 
     const today = new Date();
-    const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, planStart);
+    const { diffDays, weekIndex, dayIndex } = getPlanDayPosition(today, planStart, (assignment as any).scheduleMode);
     const currentWeekIndex = Math.min(durationWeeks - 1, Math.max(0, weekIndex));
     const currentDayIndex = Math.min(6, Math.max(0, dayIndex));
     const completionPercent = totalScheduledSessions > 0
@@ -1667,6 +1674,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
         planStart,
         durationWeeks,
         now: today,
+        scheduleMode: (assignment as any).scheduleMode,
       });
       // Only the first missed session (server-decided) is exposed as actionable.
       missedSeances = overdue.slice(0, 1).map((o) => ({
@@ -1683,6 +1691,7 @@ router.get('/plan/active', async (req: AuthRequest, res: Response) => {
       assignment: {
         id: String((assignment as any)._id),
         startDate: utcDateKey(planStart),
+        scheduleMode: (assignment as any).scheduleMode ?? 'calendar',
         // PlanAssignment.endDate is exclusive; mobile displays the last active day.
         endDate: businessDateKey(addBusinessDays(new Date((assignment as any).endDate), -1)),
         durationWeeks,

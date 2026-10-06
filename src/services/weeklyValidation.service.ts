@@ -78,8 +78,8 @@ export async function calculateWeeklyValidation(
 
   if (assignment) {
     const assignmentStart = businessDateAsUtcCalendarDate(new Date((assignment as any).startDate));
-    weekNumber = getCurrentWeekNumber(assignmentStart, (assignment as any).durationWeeks || 5, ref);
-    ({ weekStart, weekEnd } = getWeekWindow(assignmentStart, weekNumber));
+    weekNumber = getCurrentWeekNumber(assignmentStart, (assignment as any).durationWeeks || 5, ref, (assignment as any).scheduleMode);
+    ({ weekStart, weekEnd } = getWeekWindow(assignmentStart, weekNumber, (assignment as any).scheduleMode));
 
     planId = assignment.levelTemplateId;
     const { level: plan } = await loadEffectiveLevel(userId, assignment.levelTemplateId);

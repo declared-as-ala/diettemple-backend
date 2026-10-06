@@ -69,8 +69,8 @@ export function resolveWeekSessions(week: IWeekTemplate | null | undefined): IPl
 }
 
 /** Which week number (1-indexed, clamped to [1, durationWeeks]) `now` falls on for a plan starting at `planStart`. */
-export function getCurrentWeekNumber(planStart: Date, durationWeeks: number, now: Date): number {
-  const { weekIndex } = getPlanDayPosition(now, planStart);
+export function getCurrentWeekNumber(planStart: Date, durationWeeks: number, now: Date, mode?: string | null): number {
+  const { weekIndex } = getPlanDayPosition(now, planStart, mode);
   return Math.min(durationWeeks, Math.max(1, weekIndex + 1));
 }
 
@@ -78,10 +78,10 @@ export function computeSessionSchedule(
   planStart: Date,
   weekNumber: number,
   session: Pick<IPlannedWeekSession, 'recommendedDayOffset'>,
-  opts: { catchUpWindowHours?: number } = {}
+  opts: { catchUpWindowHours?: number; scheduleMode?: string | null } = {}
 ): { recommendedAt: Date; dueAt: Date } {
   const catchUpWindowHours = opts.catchUpWindowHours ?? DEFAULT_CATCH_UP_WINDOW_HOURS;
-  const { weekStart } = getWeekWindow(planStart, weekNumber);
+  const { weekStart } = getWeekWindow(planStart, weekNumber, opts.scheduleMode);
   const recommendedAt = addDaysUtc(utcStartOfCalendarDate(weekStart), session.recommendedDayOffset);
   const dueAt = new Date(recommendedAt.getTime() + catchUpWindowHours * 60 * 60 * 1000);
   return { recommendedAt, dueAt };

@@ -18,7 +18,7 @@ import WorkoutSession from '../models/WorkoutSession.model';
 import { resolveWorkoutAssignment } from './workoutAssignment.service';
 import { buildScheduleTrace, loadEffectiveLevel, mergeWeeksWithOverride } from './clientSchedule.service';
 import { findOverdueSessions } from './catchUp.service';
-import { getPlanDayKeyForDate, getPlanDayPosition, getProgramWeekDates, utcDateKey } from '../utils/scheduleDate';
+import { getPlanDayKeyForDate, getPlanDayPosition, getProgramWeekDates, getSlotKeyForDate, utcDateKey } from '../utils/scheduleDate';
 
 const NAMES: Record<string, string> = {
   push: 'INI_Push_S1/S2/S3_B_H',
@@ -237,6 +237,85 @@ describe('regression: client starting Tuesday 22 Sep (screenshots), Week 4 = 12-
     ]);
     // the old relative formula (planStart + 7*week + idx) put Push on 13 Oct, Pull on 14, Legs on 16, UpperC on 17
     expect(w4.find((r) => r.scheduledDate === '2026-10-13')!.sessionName).toBe(NAMES.pull);
+  });
+});
+
+describe("relative schedule mode: Session 1 (Push) starts the plan on the client's start day", () => {
+  const asg = (startDate: string) => ({ ...assignment(startDate), scheduleMode: 'relative' });
+  const FIRST_DAY = Date.parse('2026-10-06T00:00:00Z'); // Tuesday
+  const day = (n: number) => new Date(FIRST_DAY + n * 86400000).toISOString().slice(0, 10);
+
+  it('Tuesday start: EVERY week 1-5 is 7 days from the start; Push on the start day, then Pull/Legs/Upper at J1/J3/J4', async () => {
+    mockTemplates();
+    mockNoCompletions();
+    mockOverride(null);
+    mockLevel(plan());
+    (resolveWorkoutAssignment as jest.Mock).mockResolvedValue(asg('2026-10-06T00:00:00Z') as never);
+    const { rows, effective } = await buildScheduleTrace('u1');
+    expect(effective!.scheduleMode).toBe('relative');
+    expect(rows).toHaveLength(20);
+    for (let w = 1; w <= 5; w++) {
+      const wr = rows.filter((r) => r.weekNumber === w);
+      expect(wr.map((r) => r.sessionName)).toEqual([NAMES.push, NAMES.pull, NAMES.legs, NAMES.upper]);
+      expect(wr.map((r) => r.scheduledDate)).toEqual(
+        [0, 1, 3, 4].map((off) => day((w - 1) * 7 + off))
+      );
+      expect(wr.every((r) => r.scheduledDate !== null && r.flags.length === 0)).toBe(true);
+    }
+    // Week 1: Tue 6 Push, Wed 7 Pull, Fri 9 Legs, Sat 10 Upper (nothing dropped, Push first)
+    expect(rows.filter((r) => r.weekNumber === 1).map((r) => r.scheduledDate)).toEqual(['2026-10-06', '2026-10-07', '2026-10-09', '2026-10-10']);
+  });
+
+  it('mobile /me/today lookup (slot key for the date) returns the same session as the trace for every date of the plan', async () => {
+    mockTemplates();
+    mockNoCompletions();
+    mockOverride(null);
+    mockLevel(plan());
+    (resolveWorkoutAssignment as jest.Mock).mockResolvedValue(asg('2026-10-06T00:00:00Z') as never);
+    const { rows } = await buildScheduleTrace('u1');
+    const { level } = await loadEffectiveLevel('u1', 'plan-A');
+    const planStart = new Date('2026-10-06T00:00:00Z');
+    for (let w = 1; w <= 5; w++) {
+      for (const date of getProgramWeekDates(planStart, w, 'relative')) {
+        const { weekIndex, dayIndex } = getPlanDayPosition(date, planStart, 'relative');
+        expect(weekIndex + 1).toBe(w);
+        const week = level.weeks.find((x: any) => x.weekNumber === weekIndex + 1);
+        const slotKey = getSlotKeyForDate(date, planStart, 'relative');
+        expect(slotKey).toBe(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][dayIndex]);
+        const mobileToday = week.days[slotKey][0]?.sessionTemplateId ?? null;
+        const traced = rows.find((r) => r.scheduledDate === utcDateKey(date))?.sessionTemplateId ?? null;
+        expect(mobileToday).toBe(traced);
+      }
+    }
+  });
+
+  it('week boundaries: day 6 is still week 1, day 7 starts week 2 (a Tuesday start rolls over on the next Tuesday)', () => {
+    const start = new Date('2026-10-06T00:00:00Z');
+    expect(getPlanDayPosition(new Date('2026-10-12T00:00:00Z'), start, 'relative')).toMatchObject({ weekIndex: 0, dayIndex: 6 });
+    expect(getPlanDayPosition(new Date('2026-10-13T00:00:00Z'), start, 'relative')).toMatchObject({ weekIndex: 1, dayIndex: 0 });
+    // the legacy mode is untouched: Monday 12 Oct starts week 2
+    expect(getPlanDayPosition(new Date('2026-10-12T00:00:00Z'), start, 'calendar')).toMatchObject({ weekIndex: 1, dayIndex: 0 });
+    expect(getPlanDayPosition(new Date('2026-10-12T00:00:00Z'), start)).toMatchObject({ weekIndex: 1, dayIndex: 0 });
+  });
+
+  it('Monday start: relative == calendar (nobody who already starts on Monday changes)', () => {
+    const start = new Date('2026-10-05T00:00:00Z');
+    for (let w = 1; w <= 5; w++) {
+      expect(getProgramWeekDates(start, w, 'relative').map(utcDateKey)).toEqual(getProgramWeekDates(start, w, 'calendar').map(utcDateKey));
+    }
+  });
+
+  it('rattrapage: the first missed session is Push (not Pull) for a Tuesday start', async () => {
+    mockNoCompletions();
+    const level = { weeks: [makeWeek(1)] } as any;
+    const planStart = new Date('2026-10-06T00:00:00Z');
+    const base = { userId: 'u1', levelDoc: level, planStart, durationWeeks: 1 };
+    const rel = await findOverdueSessions({ ...base, now: new Date('2026-10-10T12:00:00Z'), scheduleMode: 'relative' });
+    expect(rel.map((o) => [o.originalDate, o.sessionTemplateId])).toEqual([
+      ['2026-10-06', 'w1-push'], ['2026-10-07', 'w1-pull'], ['2026-10-09', 'w1-legs'],
+    ]);
+    const legacy = await findOverdueSessions({ ...base, now: new Date('2026-10-10T12:00:00Z') });
+    expect(legacy[0].sessionTemplateId).toBe('w1-pull'); // legacy calendar clients keep their old behaviour
   });
 });
 

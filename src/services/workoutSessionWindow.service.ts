@@ -13,7 +13,7 @@ import { businessDateAsUtcCalendarDate } from '../utils/businessDate';
 import {
   getPlanDayPosition,
   getProgramWeekDates,
-  getPlanDayKeyForDate,
+  getSlotKeyForDate,
   utcDateKey,
   tunisiaDateKey,
 } from '../utils/scheduleDate';
@@ -76,7 +76,7 @@ export async function isFutureOnlySession(
   const { level }: { level: any } = await loadEffectiveLevel(userId, assignment.levelTemplateId);
   if (!level?.weeks?.length) return false;
   const planStart = businessDateAsUtcCalendarDate(new Date(assignment.startDate));
-  const { weekIndex } = getPlanDayPosition(now, planStart);
+  const { weekIndex } = getPlanDayPosition(now, planStart, assignment.scheduleMode);
   if (weekIndex < 0 || weekIndex >= Number(assignment.durationWeeks)) return false;
   const weekNumber = weekIndex + 1;
   const week = level.weeks.find((w: any) => w.weekNumber === weekNumber);
@@ -86,8 +86,8 @@ export async function isFutureOnlySession(
   const todayMax = [utcDateKey(now), tunisiaDateKey(now), clientDateKey || ''].sort().pop() as string;
   const sid = String(sessionTemplateId);
   const scheduledDates: string[] = [];
-  for (const date of getProgramWeekDates(planStart, weekNumber)) {
-    const placements = week.days?.[getPlanDayKeyForDate(date)] || [];
+  for (const date of getProgramWeekDates(planStart, weekNumber, assignment.scheduleMode)) {
+    const placements = week.days?.[getSlotKeyForDate(date, planStart, assignment.scheduleMode)] || [];
     if (placements.some((p: any) => String(p?.sessionTemplateId) === sid)) {
       scheduledDates.push(utcDateKey(date));
     }

@@ -24,6 +24,8 @@ export interface IPlanAssignment extends Document {
   durationWeeksSnapshot?: number;
   durationDaysSnapshot?: number;
   legacyAccessPreserved?: boolean;
+  /** 'relative' = weeks count from the start day (J0 on the start day). Missing/'calendar' = legacy Monday-Sunday weeks. */
+  scheduleMode?: 'calendar' | 'relative';
   assignedBy?: mongoose.Types.ObjectId;
   assignedAt: Date;
   note?: string;
@@ -81,6 +83,8 @@ const PlanAssignmentSchema: Schema = new Schema(
     durationWeeksSnapshot: { type: Number, min: 1 },
     durationDaysSnapshot: { type: Number, min: 7 },
     legacyAccessPreserved: { type: Boolean, default: false },
+    // No schema default on purpose: documents created before this field must stay 'calendar' (read as missing).
+    scheduleMode: { type: String, enum: ['calendar', 'relative'] },
     assignedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     assignedAt: { type: Date, default: Date.now },
     note: { type: String },

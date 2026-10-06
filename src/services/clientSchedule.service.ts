@@ -18,7 +18,7 @@ import { businessDateAsUtcCalendarDate } from '../utils/businessDate';
 import {
   PLAN_DAY_KEYS,
   getProgramWeekDates,
-  getPlanDayKeyForDate,
+  getSlotKeyForDate,
   legacyDayKeyFromOffset,
   utcDateKey,
 } from '../utils/scheduleDate';
@@ -144,7 +144,7 @@ export async function buildScheduleTrace(userId: unknown, at: Date = new Date())
     const week = level.weeks.find((w: any) => w.weekNumber === weekNumber);
     if (!week) continue;
     const dateByDayKey = new Map<string, string>();
-    for (const d of getProgramWeekDates(planStart, weekNumber)) dateByDayKey.set(getPlanDayKeyForDate(d), utcDateKey(d));
+    for (const d of getProgramWeekDates(planStart, weekNumber, assignment.scheduleMode)) dateByDayKey.set(getSlotKeyForDate(d, planStart, assignment.scheduleMode), utcDateKey(d));
 
     // Drift check: legacy days{} (used for dates) vs ordered sessions[] (used for order/offset).
     const drift =
@@ -192,6 +192,7 @@ export async function buildScheduleTrace(userId: unknown, at: Date = new Date())
       assignmentSource: assignment.source,
       planId: String(level._id),
       startDate: utcDateKey(planStart),
+      scheduleMode: assignment.scheduleMode,
       durationWeeks: assignment.durationWeeks,
       override,
     },

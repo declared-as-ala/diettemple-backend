@@ -17,6 +17,8 @@ export interface ResolvedWorkoutAssignment {
   endDate: Date;
   durationWeeks: number;
   assignedAt?: Date;
+  /** How weeks/days are laid out for this client (see utils/scheduleDate). Legacy rows without the field = 'calendar'. */
+  scheduleMode: 'calendar' | 'relative';
   source: WorkoutAssignmentSource;
 }
 
@@ -41,6 +43,7 @@ export async function resolveWorkoutAssignment(
       startDate: new Date((assignment as any).startDate),
       endDate: new Date((assignment as any).endDate),
       durationWeeks: Number((assignment as any).durationWeeksSnapshot || (assignment as any).durationWeeks),
+      scheduleMode: (assignment as any).scheduleMode === 'relative' ? 'relative' : 'calendar',
       source: 'plan-assignment',
     };
   }
@@ -80,6 +83,7 @@ export function assignmentFromSubscription(subscription: {
     endDate: new Date(subscription.endAt),
     durationWeeks,
     assignedAt: subscription.createdAt,
+    scheduleMode: 'calendar',
     source: 'subscription-fallback',
   };
 }
@@ -108,6 +112,7 @@ export async function syncWorkoutAssignmentFromSubscription(params: {
     assignedBy: params.assignedBy,
     assignedAt: now,
     note: params.note,
+    scheduleMode: 'relative',
   });
   await assignment.save();
   return assignment;
