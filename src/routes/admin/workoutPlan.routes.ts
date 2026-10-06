@@ -5,7 +5,9 @@ import LevelTemplate from '../../models/LevelTemplate.model';
 import WorkoutSession from '../../models/WorkoutSession.model';
 import { calculateTrainingWeekProgress } from '../../services/weeklyProgress.service';
 import { cancelPlanAssignments, createPlanAssignment, reconcileUserAssignments, renewPlanAssignment } from '../../services/planAssignmentLifecycle.service';
-import { addBusinessDays, diffBusinessDays, parseBusinessDate, todayInBusinessTimeZone } from '../../utils/businessDate';
+import { addBusinessDays, businessDateAsUtcCalendarDate, diffBusinessDays, parseBusinessDate, todayInBusinessTimeZone } from '../../utils/businessDate';
+import { getPlanDayPosition, getProgramWeekDates, getSlotKeyForDate, utcDateKey } from '../../utils/scheduleDate';
+import { loadEffectiveLevel } from '../../services/clientSchedule.service';
 
 const router = Router();
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
@@ -49,7 +51,7 @@ router.get('/:userId', async (req: AuthRequest, res: Response) => {
     await reconcileUserAssignments(userId);
     const assignment = await PlanAssignment.findOne({ userId, status: { $in: ['active', 'scheduled'] } }).sort({ startDate: 1 }).lean();
     if (!assignment) return res.json({ assignment: null, plan: null, progress: null, weekProgress: [] });
-    const level = await LevelTemplate.findById(assignment.levelTemplateId).lean();
+    const { level } = await loadEffectiveLevel(userId, assignment.levelTemplateId);
     const durationWeeks = Number((assignment as any).durationWeeksSnapshot || assignment.durationWeeks);
     if (!Number.isInteger(durationWeeks) || durationWeeks < 1) return res.status(409).json({ message: 'Assignment is missing its duration snapshot' });
 
@@ -58,20 +60,22 @@ router.get('/:userId', async (req: AuthRequest, res: Response) => {
     const today = todayInBusinessTimeZone();
     const completed = await WorkoutSession.find({ userId, status: 'completed', date: { $gte: start, $lt: end } }).select('date sessionId completionType').lean();
     let totalScheduled = 0, totalCompleted = 0, totalMissed = 0;
+    // Same layout as the mobile app and the weekly progress: calendar weeks, slots resolved per assignment mode.
+    const mode = (assignment as any).scheduleMode;
+    const planStartCal = businessDateAsUtcCalendarDate(start);
     for (let week = 0; week < durationWeeks; week += 1) {
       const weekTemplate = (level as any)?.weeks?.find((item: any) => item.weekNumber === week + 1);
-      for (let day = 0; day < 7; day += 1) {
-        const placements = (weekTemplate?.days as any)?.[DAY_KEYS[day]] || [];
+      for (const dayDate of getProgramWeekDates(planStartCal, week + 1, mode)) {
+        const placements = (weekTemplate?.days as any)?.[getSlotKeyForDate(dayDate, planStartCal, mode)] || [];
         if (!placements.length) continue;
         totalScheduled += placements.length;
-        const scheduledDate = addBusinessDays(start, week * 7 + day);
+        const scheduledDate = parseBusinessDate(utcDateKey(dayDate));
         if (scheduledDate > today) continue;
         const done = (completed as any[]).some((item) => diffBusinessDays(new Date(item.date), scheduledDate) === 0);
         if (done) totalCompleted += placements.length; else totalMissed += placements.length;
       }
     }
-    const diff = diffBusinessDays(today, start);
-    const currentWeek = Math.max(0, Math.min(durationWeeks - 1, Math.floor(diff / 7)));
+    const currentWeek = Math.max(0, Math.min(durationWeeks - 1, getPlanDayPosition(today, planStartCal, mode).weekIndex));
     let weekProgress: Array<Awaited<ReturnType<typeof calculateTrainingWeekProgress>>> = [];
     try { weekProgress = await Promise.all(Array.from({ length: durationWeeks }, (_, index) => calculateTrainingWeekProgress(userId, (assignment as any)._id, index + 1))); } catch { weekProgress = []; }
 

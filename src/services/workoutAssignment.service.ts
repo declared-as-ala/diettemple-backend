@@ -17,7 +17,7 @@ export interface ResolvedWorkoutAssignment {
   endDate: Date;
   durationWeeks: number;
   assignedAt?: Date;
-  /** How weeks/days are laid out for this client (see utils/scheduleDate). Legacy rows without the field = 'calendar'. */
+  /** How Week 1 is laid out for this client (see utils/scheduleDate). Legacy rows without the field = 'calendar'. */
   scheduleMode: 'calendar' | 'relative';
   source: WorkoutAssignmentSource;
 }

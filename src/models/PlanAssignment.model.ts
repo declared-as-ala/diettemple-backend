@@ -24,7 +24,7 @@ export interface IPlanAssignment extends Document {
   durationWeeksSnapshot?: number;
   durationDaysSnapshot?: number;
   legacyAccessPreserved?: boolean;
-  /** 'relative' = weeks count from the start day (J0 on the start day). Missing/'calendar' = legacy Monday-Sunday weeks. */
+  /** 'relative' = Week 1 slots start ON the start day (Session 1 first); weeks are Monday-Sunday. Missing/'calendar' = legacy (J0 is always a Monday). */
   scheduleMode?: 'calendar' | 'relative';
   assignedBy?: mongoose.Types.ObjectId;
   assignedAt: Date;
