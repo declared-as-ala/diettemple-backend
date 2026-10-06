@@ -80,6 +80,10 @@ export function serializeExerciseVideosDeep<T>(value: T): T {
 
   if (!value || typeof value !== 'object') return value;
 
+  // ObjectId, Date, Buffer... know how to serialize themselves (toJSON). Spreading them into a plain object would
+  // turn an ObjectId into { buffer: {...} } and a Date into {} — leave them untouched for res.json().
+  if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return value;
+
   const record = value as AnyRecord;
   const looksLikeExercise =
     ('videoUrl' in record || 'videoFilePath' in record) &&
