@@ -7,7 +7,7 @@ import sharp from 'sharp';
 const ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
 const MIN_DIMENSION = 512;
-const MAX_SIDE_RESIZE = 1280;
+const MAX_SIDE_RESIZE = 1024; // enough to recognise food; smaller upload = faster AI
 
 export interface MealImageValidationResult {
   valid: true;
@@ -117,7 +117,7 @@ export async function resizeMealImageIfNeeded(buffer: Buffer, mime: string): Pro
     pipeline = sharp(buffer).resize(MAX_SIDE_RESIZE, MAX_SIDE_RESIZE, { fit: 'inside' });
     if (mime === 'image/png') return pipeline.png({ compressionLevel: 6 }).toBuffer();
     if (mime === 'image/webp') return pipeline.webp({ quality: 85 }).toBuffer();
-    return pipeline.jpeg({ quality: 88 }).toBuffer();
+    return pipeline.jpeg({ quality: 82 }).toBuffer();
   } catch {
     return buffer;
   }

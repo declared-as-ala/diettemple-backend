@@ -8,11 +8,25 @@ import sharp from 'sharp';
 import { extractJsonObject } from '../utils/jsonExtract';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+// Ordered model chain. The 2.5 family is "no longer available to new users" (Google), so it is not used.
+// GEMINI_MODELS="a,b" overrides; GEMINI_MODEL (single) is still honoured as the first entry.
+const GEMINI_MODELS: string[] = (
+  process.env.GEMINI_MODELS ||
+  [process.env.GEMINI_MODEL, 'gemini-3.1-flash-lite', 'gemini-3.5-flash'].filter(Boolean).join(',')
+)
+  .split(',')
+  .map((m) => m.trim())
+  .filter((m, i, all) => m && all.indexOf(m) === i);
+const GEMINI_MODEL = GEMINI_MODELS[0];
 const REQUEST_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '15000', 10) || 15_000;
-const MAX_IMAGE_SIDE = parseInt(process.env.GEMINI_MAX_IMAGE_SIDE || '1280', 10) || 1280;
-const JPEG_QUALITY = parseInt(process.env.GEMINI_JPEG_QUALITY || '82', 10) || 82;
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+/** Gym check-in has an automatic fallback now, so never make the client wait long for the AI. */
+const GYM_TIMEOUT_MS = parseInt(process.env.GEMINI_GYM_TIMEOUT_MS || '7000', 10) || 7_000;
+/** If the first model has not answered after this long, ask the next model too and take whoever answers first. */
+const HEDGE_AFTER_MS = parseInt(process.env.GEMINI_HEDGE_AFTER_MS || '3000', 10) || 3_000;
+const MAX_IMAGE_SIDE = parseInt(process.env.GEMINI_MAX_IMAGE_SIDE || '768', 10) || 768;
+const JPEG_QUALITY = parseInt(process.env.GEMINI_JPEG_QUALITY || '80', 10) || 80;
+const geminiUrl = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
 const CATEGORIES = ['protein', 'carb', 'fat', 'vegetable', 'fruit', 'sauce', 'drink', 'other'] as const;
 const GYM_REASON_CODES = ['no_equipment', 'too_dark', 'screenshot_suspected', 'not_a_gym', 'gym_confirmed', 'uncertain_scene'] as const;
@@ -92,69 +106,114 @@ function safeNone(): GeminiGymResult {
   };
 }
 
-async function callGeminiVision(
-  prompt: string,
-  buffer: Buffer,
-  mime: string,
-  opts: { maxOutputTokens?: number; timeoutMs?: number } = {}
-): Promise<string | null> {
-  const requestId = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  if (!GEMINI_API_KEY) {
-    console.warn(`[gemini-vision] requestId=${requestId} GEMINI_API_KEY missing`);
-    return null;
-  }
+interface VisionOpts {
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+  hedgeAfterMs?: number;
+}
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
+/** One request to one model. Returns the text, or null on any failure (logged). */
+async function requestOnce(
+  model: string,
+  prompt: string,
+  base64: string,
+  mime: string,
+  maxOutputTokens: number,
+  signal: AbortSignal,
+  requestId: string
+): Promise<string | null> {
   try {
-    const response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(geminiUrl(model), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': GEMINI_API_KEY,
-      },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
       body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType: mime, data: buffer.toString('base64') } },
-          ],
-        }],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: opts.maxOutputTokens ?? 2048,
-          responseMimeType: 'application/json',
-        },
+        contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType: mime, data: base64 } }] }],
+        generationConfig: { temperature: 0, maxOutputTokens, responseMimeType: 'application/json' },
       }),
-      signal: controller.signal,
+      signal,
     });
     const responseText = await response.text();
     if (!response.ok) {
-      console.warn(`[gemini-vision] requestId=${requestId} model=${GEMINI_MODEL} status=${response.status}`);
+      console.warn(`[gemini-vision] requestId=${requestId} model=${model} status=${response.status}`);
       return null;
     }
-
     let data: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     try {
       data = JSON.parse(responseText) as typeof data;
     } catch {
-      console.warn(`[gemini-vision] requestId=${requestId} response_not_json`);
+      console.warn(`[gemini-vision] requestId=${requestId} model=${model} response_not_json`);
       return null;
     }
     const content = data.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || '';
     if (!content) {
-      console.warn(`[gemini-vision] requestId=${requestId} empty_content`);
+      console.warn(`[gemini-vision] requestId=${requestId} model=${model} empty_content`);
       return null;
     }
     return content;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[gemini-vision] requestId=${requestId} ${/abort|timeout/i.test(message) ? 'timeout' : 'request_failed'}`);
+    if (!signal.aborted) console.warn(`[gemini-vision] requestId=${requestId} model=${model} ${/abort|timeout/i.test(message) ? 'timeout' : 'request_failed'}`);
     return null;
-  } finally {
-    clearTimeout(timeoutId);
   }
+}
+
+/**
+ * Fast + resilient: asks the first model; if it fails it moves to the next at once, and if it is merely SLOW
+ * (> hedgeAfterMs) it asks the next model in parallel. The first good answer wins and the rest are cancelled.
+ * Hard overall deadline = timeoutMs.
+ */
+async function callGeminiVision(
+  prompt: string,
+  buffer: Buffer,
+  mime: string,
+  opts: VisionOpts = {}
+): Promise<{ content: string; model: string } | null> {
+  const requestId = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  if (!GEMINI_API_KEY) {
+    console.warn(`[gemini-vision] requestId=${requestId} GEMINI_API_KEY missing`);
+    return null;
+  }
+  const totalMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const hedgeMs = opts.hedgeAfterMs ?? HEDGE_AFTER_MS;
+  const maxOutputTokens = opts.maxOutputTokens ?? 2048;
+  const base64 = buffer.toString('base64');
+  const startedAt = Date.now();
+
+  return new Promise((resolve) => {
+    const controllers: AbortController[] = [];
+    let settled = false;
+    let started = 0;
+    let failed = 0;
+    let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (value: { content: string; model: string } | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      controllers.forEach((c) => c.abort());
+      if (value) console.log(`[gemini-vision] requestId=${requestId} model=${value.model} ok in ${Date.now() - startedAt}ms`);
+      else console.warn(`[gemini-vision] requestId=${requestId} no answer after ${Date.now() - startedAt}ms`);
+      resolve(value);
+    };
+    const deadline = setTimeout(() => finish(null), totalMs);
+
+    const startNext = () => {
+      if (settled || started >= GEMINI_MODELS.length) return;
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      const model = GEMINI_MODELS[started++];
+      const ac = new AbortController();
+      controllers.push(ac);
+      void requestOnce(model, prompt, base64, mime, maxOutputTokens, ac.signal, requestId).then((content) => {
+        if (content) return finish({ content, model });
+        failed += 1;
+        if (failed >= GEMINI_MODELS.length) finish(null);
+        else startNext(); // this one failed: try the next model immediately
+      });
+      if (started < GEMINI_MODELS.length) hedgeTimer = setTimeout(startNext, hedgeMs);
+    };
+    startNext();
+  });
 }
 
 function parseMacros(raw: unknown): MealDetectionItem['macrosPer100g'] {
@@ -201,7 +260,8 @@ function parseMealResponse(content: string): MealDetectionSuccess | null {
 
 export async function analyzeMealWithGemini(imageBuffer: Buffer, mime = 'image/jpeg'): Promise<MealDetectionResult> {
   const normalizedMime = ['image/png', 'image/webp'].includes(mime) ? mime : 'image/jpeg';
-  const content = await callGeminiVision(MEAL_PROMPT, imageBuffer, normalizedMime);
+  const answer = await callGeminiVision(MEAL_PROMPT, imageBuffer, normalizedMime, { timeoutMs: MEAL_V2_TIMEOUT_MS, hedgeAfterMs: MEAL_HEDGE_AFTER_MS });
+  const content = answer?.content;
   if (!content) {
     return { ok: false, code: 'provider_error', message: 'Analyse IA indisponible pour le moment. Tu peux ajouter les aliments manuellement.' };
   }
@@ -209,7 +269,9 @@ export async function analyzeMealWithGemini(imageBuffer: Buffer, mime = 'image/j
   return parsed || { ok: false, code: 'parse_error', message: 'Réponse IA illisible. Réessaie ou ajoute les aliments manuellement.' };
 }
 
-const MEAL_V2_TIMEOUT_MS = parseInt(process.env.GEMINI_MEAL_TIMEOUT_MS || '25000', 10) || 25_000;
+// Must stay BELOW the server's REQUEST_BUDGET_MS (25 s) or the request is cut off with a 503 first.
+const MEAL_V2_TIMEOUT_MS = parseInt(process.env.GEMINI_MEAL_TIMEOUT_MS || '21000', 10) || 21_000;
+const MEAL_HEDGE_AFTER_MS = parseInt(process.env.GEMINI_MEAL_HEDGE_AFTER_MS || '7000', 10) || 7_000;
 
 /** Meal analysis v2: structured JSON (dish/ingredients, natural unit, estimate). Nutrition is NOT taken from the model. */
 export async function analyzeMealV2(
@@ -219,10 +281,12 @@ export async function analyzeMealV2(
 ): Promise<{ ok: true; meal: import('./mealScanPipeline').AiMeal } | MealDetectionFailure> {
   const { buildMealPrompt, parseMealV2 } = await import('./mealScanPipeline');
   const normalizedMime = ['image/png', 'image/webp'].includes(mime) ? mime : 'image/jpeg';
-  const content = await callGeminiVision(buildMealPrompt(knownDishes), imageBuffer, normalizedMime, {
+  const answer = await callGeminiVision(buildMealPrompt(knownDishes), imageBuffer, normalizedMime, {
     maxOutputTokens: 4096,
     timeoutMs: MEAL_V2_TIMEOUT_MS,
+    hedgeAfterMs: MEAL_HEDGE_AFTER_MS,
   });
+  const content = answer?.content;
   if (!content) {
     return { ok: false, code: 'provider_error', message: 'Analyse IA indisponible pour le moment. Tu peux ajouter les aliments manuellement.' };
   }
@@ -244,7 +308,8 @@ async function prepareGymImage(imagePath: string): Promise<Buffer> {
 
 export async function classifyGymSceneGemini(imagePath: string): Promise<GeminiGymResult> {
   const buffer = await prepareGymImage(imagePath);
-  const content = await callGeminiVision(GYM_PROMPT, buffer, 'image/jpeg');
+  const answer = await callGeminiVision(GYM_PROMPT, buffer, 'image/jpeg', { maxOutputTokens: 256, timeoutMs: GYM_TIMEOUT_MS });
+  const content = answer?.content;
   if (!content) return safeNone();
 
   const parsed = extractJsonObject<Record<string, unknown>>(content);
@@ -274,7 +339,7 @@ export async function classifyGymSceneGemini(imagePath: string): Promise<GeminiG
     confidence,
     labels: topPredictions,
     topPredictions,
-    model: `gemini:${GEMINI_MODEL}`,
+    model: `gemini:${answer?.model ?? GEMINI_MODEL}`,
     ...(reasonCode && { reasonCode }),
     ...(tips?.length && { tips }),
   };
