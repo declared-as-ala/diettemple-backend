@@ -11,6 +11,7 @@ import os from 'os';
 import { body, validationResult } from 'express-validator';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { classifyGymSceneGemini } from '../lib/geminiVision.service';
+import { aiFallbackEnabled } from '../lib/gymVerify';
 import { checkGeofence } from '../lib/geofence';
 import { decideVerification, type UploadSource } from '../lib/gymVerificationDecision';
 import GymPresenceVerification from '../models/GymPresenceVerification.model';
@@ -107,15 +108,88 @@ router.post(
       const geofence = checkGeofence(latitude, longitude);
 
       let classification;
+      let classifierThrew = false;
       try {
         classification = await classifyGymSceneGemini(req.file.path);
       } catch (e: any) {
+        console.error('[verification/gym-presence] Classification failed:', e?.message);
+        classifierThrew = true;
+        classification = {
+          topPrediction: 'unknown',
+          confidence: 0,
+          labels: [],
+          topPredictions: [] as Array<{ label: string; score: number }>,
+          model: 'none',
+        };
+      }
+
+      // AI service unavailable (provider down, timeout, unreadable answer): accept automatically, flagged for review.
+      const aiUnavailable = (classifierThrew || classification.model === 'none') && aiFallbackEnabled();
+      if (aiUnavailable) {
+        if (filePath && fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+          } catch (_) {}
+          filePath = null;
+        }
+        const serverTimestamp = new Date();
+        const checks = {
+          aiScene: false,
+          gpsProvided: geofence.gpsProvided,
+          geofenceMatch: geofence.geofenceMatch,
+          nearestGymDistanceMeters: geofence.nearestGymDistanceMeters ?? undefined,
+          uploadSource,
+        };
+        const thresholds = {
+          threshold: parseFloat(process.env.GYM_VERIFY_THRESHOLD || '0.40'),
+          margin: parseFloat(process.env.GYM_VERIFY_MARGIN || '0.05'),
+        };
+        const reason = 'Service IA indisponible : vérification acceptée automatiquement (à revoir).';
+        console.warn('[verification/gym-presence] AUTO-ACCEPTED — AI unavailable', { userId });
+        await GymPresenceVerification.create({
+          userId: req.user._id,
+          verified: true,
+          confidence: 0,
+          topPrediction: 'unknown',
+          reason,
+          checks,
+          serverTimestamp,
+          clientTimestamp,
+          latitude,
+          longitude,
+          accuracy,
+          manualReviewFlag: true,
+          classificationModel: 'none',
+          topPredictions: [],
+          thresholds,
+          uploadSource,
+          trustLevel: 'low',
+          geofenceMatch: geofence.geofenceMatch,
+          nearestGymDistanceMeters: geofence.nearestGymDistanceMeters ?? undefined,
+        });
+        return res.status(200).json({
+          verified: true,
+          aiUnavailable: true,
+          confidence: 0,
+          topPrediction: 'unknown',
+          reason,
+          manualReviewFlag: true,
+          trustLevel: 'low',
+          topPredictions: [],
+          model: 'none',
+          thresholds,
+          checks,
+          serverTimestamp: serverTimestamp.toISOString(),
+        });
+      }
+
+      // AI unavailable AND fallback disabled: keep the old behaviour (not verified, retry).
+      if (classifierThrew) {
         if (filePath && fs.existsSync(filePath)) {
           try {
             fs.unlinkSync(filePath);
           } catch (_) {}
         }
-        console.error('[verification/gym-presence] Classification failed:', e?.message);
         const serverTimestamp = new Date();
         const safeChecks = {
           aiScene: false,
@@ -136,7 +210,7 @@ router.post(
           reason: 'AI classification unavailable. Please try again.',
           checks: safeChecks,
           serverTimestamp,
-          clientTimestamp: req.body.timestamp ? new Date(req.body.timestamp) : undefined,
+          clientTimestamp,
           latitude,
           longitude,
           accuracy,

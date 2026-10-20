@@ -201,7 +201,8 @@ router.post(
             deviceInfo: req.body.deviceInfo,
             aiScore: verify.aiScore,
             gpsDistance: verify.gpsDistance,
-            method: 'photo',
+            // 'fallback' = accepted automatically because the AI service was down (audit / manual review)
+            method: verify.aiUnavailable ? 'fallback' : 'photo',
           },
         },
         { upsert: true, new: true, lean: true }
@@ -211,7 +212,8 @@ router.post(
         dateKey,
         aiScore: verify.aiScore,
         gpsDistance: verify.gpsDistance,
-        acceptedReason: 'gym scene',
+        acceptedReason: verify.aiUnavailable ? 'AI unavailable — auto-accepted' : 'gym scene',
+        aiUnavailable: !!verify.aiUnavailable,
         forceEveryTime,
       });
       // Request-timeout middleware may have already sent a 503. The DB record
@@ -223,6 +225,7 @@ router.post(
         checkinId: (checkin as any)?._id ?? null,
         verifiedAt: (checkin as any)?.verifiedAt ?? new Date().toISOString(),
         forceEveryTime,
+        aiUnavailable: !!verify.aiUnavailable,
       });
     } catch (e: unknown) {
       if (req.file?.path && fs.existsSync(req.file.path)) {

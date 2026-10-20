@@ -23,8 +23,18 @@ const GYM_TOP_LABELS = ['gym interior', 'fitness center', 'workout room', 'weigh
 
 export type RejectReason = 'too_dark' | 'blurry' | 'no_equipment' | 'looks_like_food' | 'screenshot_suspected' | 'invalid_file' | 'ai_unavailable' | 'provider_error';
 
+/**
+ * When the AI provider is down, the check-in is accepted automatically (after the local checks) instead of
+ * blocking the client. Set GYM_VERIFY_AI_FALLBACK=false to go back to "reject with a retry message".
+ */
+export function aiFallbackEnabled(): boolean {
+  return (process.env.GYM_VERIFY_AI_FALLBACK ?? 'true').toLowerCase() !== 'false';
+}
+
 export interface GymVerifyResult {
   accepted: boolean;
+  /** true when accepted WITHOUT AI scoring because the AI service was unavailable (flag it for review). */
+  aiUnavailable?: boolean;
   reason: string;
   reasonCode?: RejectReason;
   aiScore?: number;
@@ -198,8 +208,18 @@ export async function validateGymPhoto(
     const aiScore = classification.confidence;
 
     if (classification.model === 'none') {
-      console.log('[gym-verify] REJECTED — provider_error: Gemini unavailable.');
       if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      if (aiFallbackEnabled()) {
+        console.warn('[gym-verify] ACCEPTED (AI unavailable) — local checks passed, AI scoring skipped.');
+        return {
+          accepted: true,
+          aiUnavailable: true,
+          reason: 'OK',
+          gpsDistance: gpsDistanceMeters,
+          details: { width, height, sizeBytes },
+        };
+      }
+      console.log('[gym-verify] REJECTED — provider_error: Gemini unavailable.');
       return {
         accepted: false,
         reason: 'Le service de vérification est temporairement indisponible. Réessaie.',
@@ -265,6 +285,16 @@ export async function validateGymPhoto(
   } catch (outerError) {
     if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
     console.error('[gym-verify] Unexpected error', outerError);
+    if (aiFallbackEnabled()) {
+      console.warn('[gym-verify] ACCEPTED (AI unavailable) — classifier threw, local checks passed.');
+      return {
+        accepted: true,
+        aiUnavailable: true,
+        reason: 'OK',
+        gpsDistance: gpsDistanceMeters,
+        details: { width, height, sizeBytes },
+      };
+    }
     return {
       accepted: false,
       reason: 'Le service de vérification est temporairement indisponible. Réessaie.',
