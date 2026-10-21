@@ -931,16 +931,24 @@ router.post('/:id/reset-password', requireAdmin, [param('id').isMongoId(), body(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 8 caractères' });
     const bcrypt = await import('bcrypt');
-    const user = await User.findById(req.params.id).select('+tokenVersion');
-    if (!user) return res.status(404).json({ message: 'Client introuvable' });
-    user.passwordHash = await bcrypt.default.hash(req.body.newPassword, 12);
-    user.tokenVersion = (user.tokenVersion || 0) + 1;
-    user.biometricEnabled = false;
-    user.biometricType = null;
-    await user.save();
-    await AuditLog.create({ actorAdminId: req.user!._id, targetUserId: user._id, actionType: 'password_reset', metadata: { sessionsRevoked: true } });
+    const passwordHash = await bcrypt.default.hash(String(req.body.newPassword), 12);
+    // Targeted update: user.save() re-validates the WHOLE legacy document, so one old invalid field
+    // (sexe, address, enum...) made the password change fail with a 500.
+    const result = await User.updateOne(
+      { _id: req.params.id },
+      { $set: { passwordHash, biometricEnabled: false, biometricType: null }, $inc: { tokenVersion: 1 } },
+    );
+    if (!result.matchedCount) return res.status(404).json({ message: 'Client introuvable' });
+    try {
+      await AuditLog.create({ actorAdminId: req.user!._id, targetUserId: req.params.id, actionType: 'password_reset', metadata: { sessionsRevoked: true } });
+    } catch (auditError) {
+      console.error('[reset-password] audit log failed', (auditError as Error).message);
+    }
     return res.json({ message: 'Mot de passe réinitialisé. Toutes les sessions ont été révoquées.' });
-  } catch (error: unknown) { return res.status(500).json({ message: (error as Error).message }); }
+  } catch (error: unknown) {
+    console.error('[reset-password] failed', (error as Error).message);
+    return res.status(500).json({ message: 'Impossible de réinitialiser le mot de passe. Réessayez.' });
+  }
 });
 
 router.put(
@@ -1060,7 +1068,11 @@ router.put(
         });
       }
 
-      res.json({ client: user });
+      const safeClient = user.toObject() as unknown as Record<string, unknown>;
+      delete safeClient.passwordHash;
+      delete safeClient.otp;
+      delete safeClient.otpExpires;
+      res.json({ client: safeClient });
     } catch (e: unknown) {
       res.status(500).json({ message: (e as Error).message });
     }
