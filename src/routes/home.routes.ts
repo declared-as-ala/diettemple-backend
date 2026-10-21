@@ -74,8 +74,8 @@ router.get(
       if (!populatedSession && dailyProgramObj.sessionTemplateId) {
         sessionIdString = dailyProgramObj.sessionTemplateId.toString();
         const template = await SessionTemplate.findById(dailyProgramObj.sessionTemplateId)
-          .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath imageUrl instruction message warmupInstruction')
-          .populate('items.alternatives', 'name muscleGroup equipment videoUrl imageUrl instruction message warmupInstruction')
+          .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
+          .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
           .lean();
         if (template) {
           const t = template as any;
@@ -192,8 +192,8 @@ router.get(
 
       // 2) Try SessionTemplate (what /me/today returns as sessionTemplateId)
       const template = await SessionTemplate.findById(sessionId)
-        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath imageUrl instruction message warmupInstruction')
-        .populate('items.alternatives', 'name muscleGroup equipment videoUrl imageUrl instruction message warmupInstruction')
+        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
+        .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
         .lean();
 
       if (!template) {
@@ -264,7 +264,8 @@ router.get(
   authenticate,
   async (req: AuthRequest, res: Response) => {
     try {
-      const exercises = await Exercise.find().sort({ name: 1 }).lean();
+      // -videoOptimization: internal bookkeeping (source keys, errors) the app never needs
+      const exercises = await Exercise.find().select('-videoOptimization').sort({ name: 1 }).lean();
 
       res.json({ exercises: serializeExerciseVideosDeep(exercises) });
     } catch (error: any) {

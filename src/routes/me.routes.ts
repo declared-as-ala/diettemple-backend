@@ -1112,6 +1112,9 @@ router.get('/home/weekly-summary', async (req: AuthRequest, res: Response) => {
             title: (levelHomeContentDoc as any).title || '',
             instructions: (levelHomeContentDoc as any).instructions || '',
             videoUrl: (levelHomeContentDoc as any).videoUrl || '',
+            videoVariants: (levelHomeContentDoc as any).videoVariants || undefined,
+            videoPosterUrl: (levelHomeContentDoc as any).videoPosterUrl || undefined,
+            videoDurationSec: (levelHomeContentDoc as any).videoDurationSec || undefined,
           }
         : null,
     });
@@ -1750,8 +1753,8 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const session = await SessionTemplate.findById(req.params.sessionTemplateId)
-        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath instruction message warmupInstruction')
-        .populate('items.alternatives', 'name muscleGroup equipment videoUrl instruction message warmupInstruction')
+        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec instruction message warmupInstruction')
+        .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec instruction message warmupInstruction')
         .lean();
       if (!session) return res.status(404).json({ message: 'Session not found' });
       const s = { ...session } as any;

@@ -53,6 +53,19 @@ mongoose
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`Server running on port ${PORT}`);
     });
+
+    // Shrink the existing exercise / Home level videos (HEVC 1080p, 8-10 MB each) into mobile-friendly renditions.
+    // Idempotent (skips videos already done), ONE video at a time, started a few minutes after boot so the API is
+    // never starved. Disable with VIDEO_OPTIMIZE_ON_START=false. Originals are never modified.
+    if (process.env.VIDEO_OPTIMIZE_ON_START !== 'false') {
+      const delayMs = Math.max(0, parseInt(process.env.VIDEO_OPTIMIZE_DELAY_MS || '180000', 10) || 180_000);
+      setTimeout(() => {
+        import('./services/videoVariants.service')
+          .then((m) => m.enqueueAllExerciseVideos(false))
+          .then((r) => console.log(`[video-optimize] queued ${r.queued} of ${r.total} videos`))
+          .catch((e) => console.error('[video-optimize] startup queue failed:', e?.message));
+      }, delayMs).unref();
+    }
   })
   .catch((error) => {
     console.error('MongoDB connection error:', error);

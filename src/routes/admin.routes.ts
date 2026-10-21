@@ -29,6 +29,8 @@ import nutritionAssignmentRoutes from './admin/nutritionAssignment.routes';
 import clientsRoutes from './admin/clients.routes';
 import recipesRoutes from './admin/recipes.routes';
 import landingVideoRoutes from './admin/landingVideo.routes';
+import videoOptimizeRoutes from './admin/videoOptimize.routes';
+import { enqueueExerciseVideo, enqueueLevelHomeVideo } from '../services/videoVariants.service';
 import folderRoutes from './admin/folder.routes';
 import consultationRoutes from './admin/consultation.routes';
 import Support from '../models/Support.model';
@@ -59,6 +61,7 @@ router.use('/nutrition-assignments', nutritionAssignmentRoutes);
 router.use('/recipes', recipesRoutes);
 // Landing page videos
 router.use('/landing-videos', landingVideoRoutes);
+router.use('/video-optimize', videoOptimizeRoutes);
 
 // All admin routes require authentication and admin role
 // authenticate middleware will be applied in index.ts before this router
@@ -197,9 +200,15 @@ router.post(
 
       const item = await LevelHomeContent.findOneAndUpdate(
         { levelSlug },
-        { $set: { videoUrl } },
+        {
+          $set: { videoUrl, videoOptimization: { status: 'pending', updatedAt: new Date() } },
+          // variants of the previous video must not be served for the new one
+          $unset: { videoVariants: '', videoPosterUrl: '', videoHlsUrl: '', videoDurationSec: '' },
+        },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       ).lean();
+
+      enqueueLevelHomeVideo(String((item as any)._id), true); // background; the original keeps playing meanwhile
 
       res.json({ item, videoUrl, message: 'Video uploaded successfully' });
     } catch (error: any) {
@@ -1681,6 +1690,12 @@ router.post(
       (exercise as any).videoSource   = 'upload';
       (exercise as any).videoFilePath = objectKey;
       exercise.videoUrl = videoUrl;
+      // Variants of the PREVIOUS video must not be served for the new one: cleared until the background job finishes.
+      (exercise as any).videoVariants = undefined;
+      (exercise as any).videoPosterUrl = undefined;
+      (exercise as any).videoHlsUrl = undefined;
+      (exercise as any).videoDurationSec = undefined;
+      (exercise as any).videoOptimization = { status: 'pending', updatedAt: new Date() };
       try {
         await exercise.save();
       } catch (saveError) {
@@ -1689,6 +1704,9 @@ router.post(
       }
 
       await deleteFromMinio(previousUploadUrl);
+
+      // Heavy transcoding happens in the background (never during playback); the original keeps playing meanwhile.
+      enqueueExerciseVideo(String(exercise._id), true);
 
       const updatedExercise = await Exercise.findById(req.params.id).lean();
       res.json({
@@ -1718,6 +1736,11 @@ router.delete(
       (exercise as any).videoSource = undefined;
       (exercise as any).videoFilePath = undefined;
       exercise.videoUrl = undefined;
+      (exercise as any).videoVariants = undefined;
+      (exercise as any).videoPosterUrl = undefined;
+      (exercise as any).videoHlsUrl = undefined;
+      (exercise as any).videoDurationSec = undefined;
+      (exercise as any).videoOptimization = undefined;
       await exercise.save();
 
       await deleteFromMinio(previousUploadUrl);

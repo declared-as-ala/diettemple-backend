@@ -19,6 +19,23 @@ export interface IExercise extends Document {
   videoUrl?: string;
   /** Stored filename for uploaded videos (under storage/video). */
   videoFilePath?: string;
+  /** Optimised H.264 renditions (240/360/540) generated in the background from the original upload. */
+  videoVariants?: Array<{ quality: string; url: string; bytes: number; width: number; height: number; bitrateKbps: number }>;
+  videoPosterUrl?: string;
+  /** HLS master playlist (same encodes), for longer videos / adaptive streaming. */
+  videoHlsUrl?: string;
+  videoDurationSec?: number;
+  videoOptimization?: {
+    status: 'pending' | 'processing' | 'ready' | 'failed';
+    sourceKey?: string;
+    folder?: string;
+    sourceBytes?: number;
+    sourceCodec?: string;
+    sourceBitrateKbps?: number;
+    optimizedBytes?: number;
+    error?: string;
+    updatedAt?: Date;
+  };
   instruction?: string;
   message?: string;
   warmupInstruction?: string;
@@ -73,6 +90,29 @@ const ExerciseSchema: Schema = new Schema(
     },
     videoFilePath: {
       type: String,
+    },
+    videoVariants: {
+      type: [
+        new Schema(
+          { quality: String, url: String, bytes: Number, width: Number, height: Number, bitrateKbps: Number },
+          { _id: false }
+        ),
+      ],
+      default: undefined,
+    },
+    videoPosterUrl: { type: String },
+    videoHlsUrl: { type: String },
+    videoDurationSec: { type: Number },
+    videoOptimization: {
+      status: { type: String, enum: ['pending', 'processing', 'ready', 'failed'] },
+      sourceKey: String,
+      folder: String,
+      sourceBytes: Number,
+      sourceCodec: String,
+      sourceBitrateKbps: Number,
+      optimizedBytes: Number,
+      error: String,
+      updatedAt: Date,
     },
     instruction: {
       type: String,

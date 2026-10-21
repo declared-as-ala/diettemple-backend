@@ -13,6 +13,7 @@ WORKDIR /app
 # Install Puppeteer system dependencies and Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
+    ffmpeg \
     fonts-ipafont-gothic \
     fonts-wqy-zenhei \
     fonts-thai-tlwg \

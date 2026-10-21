@@ -2,6 +2,7 @@
  * Express app factory — used by both local server (index.ts) and Vercel serverless (api/index.ts).
  * Do not call mongoose.connect() or app.listen() here.
  */
+import { applyHttpOptimization } from './middleware/httpOptimization';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -48,7 +49,7 @@ if (process.env.JWT_SECRET.length < 32) {
 }
 
 const app = express();
-app.set('etag', false); // Disable ETags — always return 200 with fresh data, never 304
+applyHttpOptimization(app); // gzip + weak ETags + revalidation headers (see middleware/httpOptimization.ts)
 
 // CORS: allow requests from any origin (admin, mobile, web). Restrict via CORS_ORIGIN in production if needed.
 const corsOrigin = process.env.CORS_ORIGIN;
