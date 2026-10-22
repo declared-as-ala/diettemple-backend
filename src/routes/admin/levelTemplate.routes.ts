@@ -318,6 +318,58 @@ router.put(
   }
 );
 
+// POST /level-templates/:id/duplicate
+// Independent copy of a plan (weeks, sessions, divisions, settings) under a unique "- Copie" name.
+router.post(
+  '/:id/duplicate',
+  [param('id').isMongoId()],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const original = await LevelTemplate.findById(req.params.id).lean();
+      if (!original) {
+        return res.status(404).json({ message: 'Level template not found' });
+      }
+      const orig = JSON.parse(JSON.stringify(original)) as Record<string, any>;
+      const gender = orig.gender ?? 'M';
+
+      let name = '';
+      for (let n = 1; n < 100; n++) {
+        const candidate = `${orig.name} - Copie${n > 1 ? ` ${n}` : ''}`;
+        if (!(await LevelTemplate.exists({ name: candidate, gender }))) {
+          name = candidate;
+          break;
+        }
+      }
+      if (!name) {
+        return res.status(409).json({ message: 'Trop de copies existantes pour ce plan.' });
+      }
+
+      const copy = await LevelTemplate.create({
+        name,
+        clientDisplayName: orig.clientDisplayName ? `${orig.clientDisplayName} - Copie` : name,
+        folderId: orig.folderId || null,
+        gender,
+        objective: orig.objective,
+        level: orig.level,
+        description: orig.description,
+        imageUrl: orig.imageUrl,
+        isActive: false, // a copy stays hidden from clients until the coach reviews it
+        durationWeeks: orig.durationWeeks,
+        minimumSessionsPerWeek: orig.minimumSessionsPerWeek,
+        maximumSessionsPerWeek: orig.maximumSessionsPerWeek,
+        catchUpWindowHours: orig.catchUpWindowHours,
+        minimumRestHoursBetweenSessions: orig.minimumRestHoursBetweenSessions,
+        carryOverMissedSessions: orig.carryOverMissedSessions,
+        divisions: orig.divisions || [],
+        weeks: orig.weeks || [],
+      });
+      res.status(201).json({ levelTemplate: copy.toObject() });
+    } catch (err: unknown) {
+      res.status(500).json({ message: (err as Error).message });
+    }
+  }
+);
+
 // DELETE /level-templates/:id
 router.delete(
   '/:id',
