@@ -16,6 +16,7 @@
   "exclude": [
     "node_modules",
     "dist",
+    "src/mobileUtils",
     "src/routes/plan.routes.ts",
     "src/routes/workoutplan.routes.ts",
     "src/models/UserPlanAssignment.model.ts",

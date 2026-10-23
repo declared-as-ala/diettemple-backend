@@ -30,6 +30,7 @@ import { avatarUpload, buildFilename, deleteFromMinio, uploadToMinio } from '../
 import { BUCKETS } from '../../lib/minioClient';
 import { requireAdmin } from '../../middleware/admin.middleware';
 import consultationRoutes from './consultation.routes';
+import { calculateMetabolic, validateMetabolicInputs, ActivityLevel } from '../../utils/metabolicCalculator';
 
 const router = Router();
 router.use('/:clientId/consultations', consultationRoutes);
@@ -156,6 +157,7 @@ router.post(
     body('poids').optional().isString(),
     body('objectif').optional().isString(),
     body('fitnessLevel').optional().isIn(['A', 'B']),
+    body('activityLevel').optional().isIn(['sedentaire', 'legerement_actif', 'moderement_actif', 'tres_actif', 'extremement_actif']),
     body('assignedPlanId').optional().isMongoId(),
     body('bodyComposition').optional().isObject(),
   ],
@@ -163,8 +165,28 @@ router.post(
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
-      const { name, email, phone, password, sexe, age, taille, poids, objectif, fitnessLevel, assignedPlanId, bodyComposition } = req.body;
+      const { name, email, phone, password, sexe, age, taille, poids, objectif, fitnessLevel, activityLevel, assignedPlanId, bodyComposition } = req.body;
       if (!email && !phone) return res.status(400).json({ message: 'Either email or phone is required' });
+
+      // Validate metabolic inputs
+      const validation = validateMetabolicInputs({
+        weightKg: poids,
+        heightCm: taille,
+        age,
+        sex: sexe,
+        activityLevel,
+      });
+      if (!validation.valid && validation.error) {
+        return res.status(400).json({ message: validation.error });
+      }
+
+      const metabolic = calculateMetabolic({
+        weightKg: poids,
+        heightCm: taille,
+        age,
+        sex: sexe,
+        activityLevel,
+      });
 
       // Validate assignedPlanId exists if provided
       if (assignedPlanId) {
@@ -189,6 +211,10 @@ router.post(
         poids,
         objectif,
         fitnessLevel,
+        activityLevel: metabolic.activityLevel || undefined,
+        bmr: metabolic.bmr ?? undefined,
+        tdee: metabolic.tdee ?? undefined,
+        metabolicCalculationUpdatedAt: (metabolic.bmr != null || metabolic.tdee != null) ? new Date() : undefined,
         assignedPlanId: assignedPlanId || undefined,
         bodyComposition: bodyComposition ? {
           bodyFatPercentage: bodyComposition.bodyFatPercentage,
@@ -969,6 +995,7 @@ router.put(
     body('poids').optional().isString(),
     body('objectif').optional().isString(),
     body('fitnessLevel').optional().isIn(['A', 'B']),
+    body('activityLevel').optional({ nullable: true }).isIn(['sedentaire', 'legerement_actif', 'moderement_actif', 'tres_actif', 'extremement_actif', '']),
     body('bodyComposition').optional().isObject(),
     body('nutritionGoal').optional().isObject(),
   ],
@@ -1007,6 +1034,42 @@ router.put(
       if (req.body.poids !== undefined) user.poids = req.body.poids;
       if (req.body.objectif !== undefined) user.objectif = req.body.objectif;
       if (req.body.fitnessLevel !== undefined) user.fitnessLevel = req.body.fitnessLevel;
+      if (req.body.activityLevel !== undefined) {
+        user.activityLevel = req.body.activityLevel ? (req.body.activityLevel as ActivityLevel) : undefined;
+      }
+
+      // Re-validate and recalculate BMR / TDEE server-side whenever relevant inputs change or are present
+      const hasMetabolicChanges =
+        req.body.sexe !== undefined ||
+        req.body.age !== undefined ||
+        req.body.taille !== undefined ||
+        req.body.poids !== undefined ||
+        req.body.activityLevel !== undefined;
+
+      const metabolicValidation = validateMetabolicInputs({
+        weightKg: user.poids,
+        heightCm: user.taille,
+        age: user.age,
+        sex: user.sexe,
+        activityLevel: user.activityLevel,
+      });
+      if (!metabolicValidation.valid && metabolicValidation.error) {
+        return res.status(400).json({ message: metabolicValidation.error });
+      }
+
+      const metabolic = calculateMetabolic({
+        weightKg: user.poids,
+        heightCm: user.taille,
+        age: user.age,
+        sex: user.sexe,
+        activityLevel: user.activityLevel,
+      });
+      user.bmr = metabolic.bmr ?? undefined;
+      user.tdee = metabolic.tdee ?? undefined;
+      if (hasMetabolicChanges && (metabolic.bmr != null || metabolic.tdee != null)) {
+        user.metabolicCalculationUpdatedAt = new Date();
+      }
+
       if (req.body.bodyComposition !== undefined) {
         user.bodyComposition = {
           bodyFatPercentage: req.body.bodyComposition.bodyFatPercentage,
@@ -1022,23 +1085,12 @@ router.put(
           fatGrams: req.body.nutritionGoal.fatGrams,
         };
 
-        // Sync calculated dailyCalories, proteinG, carbsG, fatG in nutritionTarget
-        // Mifflin-St Jeor Formula
-        const weight = parseFloat(user.poids || '0');
-        const height = parseFloat(user.taille || '0');
-        const age = parseFloat(user.age || '0');
-        const sexe = user.sexe;
-
-        let baseCal = 2000;
-        if (weight > 0 && height > 0 && age > 0 && sexe) {
-          let bmr = 10 * weight + 6.25 * height - 5 * age;
-          if (sexe === 'M') {
-            bmr += 5;
-          } else {
-            bmr -= 161;
-          }
-          baseCal = Math.round(bmr * 1.375);
-        }
+        // Sync calculated dailyCalories, proteinG, carbsG, fatG in nutritionTarget using server-calculated metabolic rate
+        const baseCal = metabolic.tdee
+          ? Math.round(metabolic.tdee)
+          : metabolic.bmr
+            ? Math.round(metabolic.bmr * 1.375)
+            : 2000;
 
         const adjustment = req.body.nutritionGoal.calorieAdjustment || 0;
         let dailyCalories = baseCal;
@@ -1131,6 +1183,31 @@ router.get(
         PlanAssignment.find({ userId }).sort({ startDate: -1 }).limit(20).populate('levelTemplateId', 'name clientDisplayName').lean(),
       ]);
       if (!user) return res.status(404).json({ message: 'User not found' });
+
+      // On-demand metabolic calculation for legacy clients missing saved values
+      if ((user as any).bmr == null && user.sexe && user.age && user.taille && user.poids) {
+        const legacyCalc = calculateMetabolic({
+          weightKg: user.poids,
+          heightCm: user.taille,
+          age: user.age,
+          sex: user.sexe,
+          activityLevel: (user as any).activityLevel,
+        });
+        if (legacyCalc.bmr != null) {
+          const updateData: Record<string, any> = {
+            bmr: legacyCalc.bmr,
+            metabolicCalculationUpdatedAt: new Date(),
+          };
+          if (legacyCalc.tdee != null) {
+            updateData.tdee = legacyCalc.tdee;
+          }
+          await User.updateOne({ _id: user._id }, { $set: updateData });
+          (user as any).bmr = legacyCalc.bmr;
+          if (legacyCalc.tdee != null) (user as any).tdee = legacyCalc.tdee;
+          (user as any).metabolicCalculationUpdatedAt = updateData.metabolicCalculationUpdatedAt;
+        }
+      }
+
       const ordersSummaryAgg = await Order.aggregate([
         { $match: { userId: user._id } },
         {

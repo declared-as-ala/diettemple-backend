@@ -42,6 +42,10 @@ export interface IUser extends Document {
     muscleMassPercentage?: number;
   };
   fitnessLevel?: 'A' | 'B';
+  activityLevel?: 'sedentaire' | 'legerement_actif' | 'moderement_actif' | 'tres_actif' | 'extremement_actif';
+  bmr?: number;
+  tdee?: number;
+  metabolicCalculationUpdatedAt?: Date;
   nutritionGoal?: {
     calorieMode?: 'SURPLUS' | 'DEFICIT';
     calorieAdjustment?: number;
@@ -157,6 +161,19 @@ const UserSchema: Schema = new Schema(
       type: String,
       enum: ['A', 'B'],
     },
+    activityLevel: {
+      type: String,
+      enum: ['sedentaire', 'legerement_actif', 'moderement_actif', 'tres_actif', 'extremement_actif'],
+    },
+    bmr: {
+      type: Number,
+    },
+    tdee: {
+      type: Number,
+    },
+    metabolicCalculationUpdatedAt: {
+      type: Date,
+    },
     nutritionGoal: {
       calorieMode: { type: String, enum: ['SURPLUS', 'DEFICIT'] },
       calorieAdjustment: { type: Number, min: 0 },
@@ -197,5 +214,3 @@ UserSchema.pre('save', function (next) {
 });
 
 export default mongoose.model<IUser>('User', UserSchema);
-
-
