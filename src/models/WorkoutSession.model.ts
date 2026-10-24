@@ -8,6 +8,9 @@ export interface IExerciseSession extends Document {
   sets: {
     setNumber: number;
     weight?: number; // in kg
+    loadMode?: 'external_weight' | 'bodyweight' | 'bodyweight_plus_weight';
+    externalWeightKg?: number;
+    additionalWeightKg?: number;
     repsCompleted?: number;
     notes?: string; // Optional notes for this set
     completed?: boolean;
@@ -64,6 +67,12 @@ const ExerciseSessionSchema: Schema = new Schema(
         weight: {
           type: Number, // in kg
         },
+        loadMode: {
+          type: String,
+          enum: ['external_weight', 'bodyweight', 'bodyweight_plus_weight'],
+        },
+        externalWeightKg: { type: Number, min: 0 },
+        additionalWeightKg: { type: Number, min: 0 },
         repsCompleted: {
           type: Number,
         },

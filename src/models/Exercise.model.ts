@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export type VideoSourceType = 'upload' | 'youtube' | 'external';
+export type ExerciseLoadMode = 'external_weight' | 'bodyweight' | 'bodyweight_plus_weight';
 
 export interface IExercise extends Document {
   name: string;
@@ -11,6 +12,9 @@ export interface IExercise extends Document {
   sets?: number;
   duration?: number; // in seconds
   defaultWeight?: number; // in kg - default weight for this exercise
+  supportedLoadModes?: ExerciseLoadMode[];
+  defaultLoadMode?: ExerciseLoadMode;
+  supportsAdditionalWeight?: boolean;
   description?: string;
   imageUrl?: string;
   /** How the video is provided: upload (file), youtube (URL), or external (other URL). */
@@ -74,6 +78,18 @@ const ExerciseSchema: Schema = new Schema(
     },
     defaultWeight: {
       type: Number, // in kg
+    },
+    supportedLoadModes: {
+      type: [{ type: String, enum: ['external_weight', 'bodyweight', 'bodyweight_plus_weight'] }],
+      default: undefined,
+    },
+    defaultLoadMode: {
+      type: String,
+      enum: ['external_weight', 'bodyweight', 'bodyweight_plus_weight'],
+    },
+    supportsAdditionalWeight: {
+      type: Boolean,
+      default: false,
     },
     description: {
       type: String,

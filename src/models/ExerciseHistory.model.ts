@@ -4,6 +4,9 @@ import { IExercise } from './Exercise.model';
 export interface ISetLog {
   setNumber: number;
   weight: number; // in kg
+  loadMode?: 'external_weight' | 'bodyweight' | 'bodyweight_plus_weight';
+  externalWeightKg?: number;
+  additionalWeightKg?: number;
   reps: number;
   completed: boolean;
   completedAt: Date;
@@ -14,6 +17,11 @@ export interface IExerciseHistory extends Document {
   exerciseId: mongoose.Types.ObjectId | IExercise;
   lastWeight: number; // Last weight used in kg
   personalRecord?: number; // Highest weight successfully completed in kg
+  personalRecords?: {
+    externalWeightKg?: number;
+    additionalWeightKg?: number;
+    bodyweightMaxReps?: number;
+  };
   lastReps: number[]; // Array of reps for each set [12, 11, 10, 9]
   lastSets: ISetLog[]; // Full set logs from last session
   lastCompletedAt?: Date;
@@ -34,6 +42,12 @@ const SetLogSchema: Schema = new Schema(
       type: Number,
       required: true,
     },
+    loadMode: {
+      type: String,
+      enum: ['external_weight', 'bodyweight', 'bodyweight_plus_weight'],
+    },
+    externalWeightKg: { type: Number, min: 0 },
+    additionalWeightKg: { type: Number, min: 0 },
     reps: {
       type: Number,
       required: true,
@@ -71,6 +85,11 @@ const ExerciseHistorySchema: Schema = new Schema(
     personalRecord: {
       type: Number,
       default: 0,
+    },
+    personalRecords: {
+      externalWeightKg: { type: Number, default: 0 },
+      additionalWeightKg: { type: Number, default: 0 },
+      bodyweightMaxReps: { type: Number, default: 0 },
     },
     lastReps: {
       type: [Number],

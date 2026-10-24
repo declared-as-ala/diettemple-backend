@@ -37,6 +37,7 @@ import {
   getPlanDayKeyForDate,
   getSlotKeyForDate,
 } from '../utils/scheduleDate';
+import { loadVolumeKg, normalizeSetLoad, type ExerciseLoadMode } from '../utils/exerciseLoad';
 import { serializeExerciseVideo, serializeExerciseVideosDeep } from '../utils/exerciseVideo';
 import { resolveWeekSessions, computeSessionSchedule, getCurrentWeekNumber } from '../services/planSchedule.service';
 import {
@@ -1753,8 +1754,8 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const session = await SessionTemplate.findById(req.params.sessionTemplateId)
-        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec instruction message warmupInstruction')
-        .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec instruction message warmupInstruction')
+        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec instruction message warmupInstruction supportedLoadModes defaultLoadMode supportsAdditionalWeight defaultWeight')
+        .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec instruction message warmupInstruction supportedLoadModes defaultLoadMode supportsAdditionalWeight defaultWeight')
         .lean();
       if (!session) return res.status(404).json({ message: 'Session not found' });
       const s = { ...session } as any;
@@ -1844,40 +1845,83 @@ router.post(
         sets = [],
       }: {
         exerciseId: string;
-        sets: Array<{ setNumber?: number; reps?: number; weightKg?: number; completedAt?: string }>;
+        sets: Array<{
+          setNumber?: number;
+          reps?: number;
+          weightKg?: number;
+          loadMode?: ExerciseLoadMode;
+          externalWeightKg?: number;
+          additionalWeightKg?: number;
+          completedAt?: string;
+        }>;
       } = req.body;
 
-      const normalizedSets = sets
-        .map((s, idx) => ({
-          setNumber: s.setNumber ?? idx + 1,
-          weight: Number(s.weightKg ?? 0),
-          reps: Number(s.reps ?? 0),
-          completed: true,
-          completedAt: s.completedAt ? new Date(s.completedAt) : new Date(),
-        }))
-        .filter((s) => Number.isFinite(s.weight) && Number.isFinite(s.reps));
+      const exercise = await Exercise.findById(exerciseId)
+        .select('supportedLoadModes defaultLoadMode supportsAdditionalWeight')
+        .lean();
+      if (!exercise) return res.status(404).json({ message: 'Exercise not found' });
+
+      let normalizedSets;
+      try {
+        normalizedSets = sets
+          .map((s, idx) => {
+            const load = normalizeSetLoad(
+              {
+                loadMode: s.loadMode,
+                externalWeightKg: s.externalWeightKg ?? s.weightKg,
+                additionalWeightKg: s.additionalWeightKg,
+                weight: s.weightKg,
+              },
+              exercise as any
+            );
+            return {
+              setNumber: s.setNumber ?? idx + 1,
+              ...load,
+              reps: Number(s.reps ?? 0),
+              completed: true,
+              completedAt: s.completedAt ? new Date(s.completedAt) : new Date(),
+            };
+          })
+          .filter((s) => Number.isInteger(s.reps) && s.reps >= 0 && s.reps <= 1000);
+      } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+      }
 
       if (normalizedSets.length === 0) {
         return res.status(400).json({ message: 'No valid sets provided' });
       }
 
       const lastSet = normalizedSets[normalizedSets.length - 1];
-      const totalVolume = normalizedSets.reduce((sum, s) => sum + s.reps * s.weight, 0);
+      const totalVolume = normalizedSets.reduce((sum, s) => sum + s.reps * loadVolumeKg(s), 0);
 
       // PR is valid ONLY when reps are between 5 and 8 (1-4 reps do not qualify)
-      const prQualifyingSets = normalizedSets.filter((s) => s.reps >= 5 && s.reps <= 8 && Number.isFinite(s.weight));
-      const maxQualifyingIncomingWeight = prQualifyingSets.reduce((max, s) => Math.max(max, s.weight), 0);
+      const prQualifyingSets = normalizedSets.filter((s) => s.reps >= 5 && s.reps <= 8);
+      const maxExternalWeight = prQualifyingSets
+        .filter((s) => s.loadMode === 'external_weight')
+        .reduce((max, s) => Math.max(max, s.externalWeightKg), 0);
+      const maxAdditionalWeight = prQualifyingSets
+        .filter((s) => s.loadMode === 'bodyweight_plus_weight')
+        .reduce((max, s) => Math.max(max, s.additionalWeightKg), 0);
+      const maxBodyweightReps = normalizedSets
+        .filter((s) => s.loadMode === 'bodyweight')
+        .reduce((max, s) => Math.max(max, s.reps), 0);
 
       const existingHistory = await ExerciseHistory.findOne({ userId, exerciseId }).lean();
       const currentPr = Number(existingHistory?.personalRecord ?? 0);
-      const personalRecord = Math.max(currentPr, maxQualifyingIncomingWeight);
+      const personalRecord = Math.max(currentPr, maxExternalWeight);
+      const personalRecords = {
+        externalWeightKg: personalRecord,
+        additionalWeightKg: Math.max(Number((existingHistory as any)?.personalRecords?.additionalWeightKg ?? 0), maxAdditionalWeight),
+        bodyweightMaxReps: Math.max(Number((existingHistory as any)?.personalRecords?.bodyweightMaxReps ?? 0), maxBodyweightReps),
+      };
 
       const history = await ExerciseHistory.findOneAndUpdate(
         { userId, exerciseId },
         {
           $set: {
-            lastWeight: lastSet.weight,
+            lastWeight: loadVolumeKg(lastSet),
             personalRecord,
+            personalRecords,
             lastReps: normalizedSets.map((s) => s.reps),
             lastSets: normalizedSets,
             lastCompletedAt: new Date(),
@@ -1894,6 +1938,7 @@ router.post(
           exerciseId: history.exerciseId,
           lastWeight: history.lastWeight,
           personalRecord: history.personalRecord ?? personalRecord,
+          personalRecords: (history as any).personalRecords ?? personalRecords,
           lastReps: history.lastReps,
           lastCompletedAt: history.lastCompletedAt,
           totalVolume: history.totalVolume,
@@ -1928,33 +1973,68 @@ router.post(
         exercises: Array<{
           exerciseId: string;
           exerciseName: string;
-          sets: Array<{ setNumber: number; reps: number; weightKg: number; completedAt?: string }>;
+          sets: Array<{
+            setNumber: number;
+            reps: number;
+            weightKg?: number;
+            loadMode?: ExerciseLoadMode;
+            externalWeightKg?: number;
+            additionalWeightKg?: number;
+            completedAt?: string;
+          }>;
         }>;
         completionType?: 'normal' | 'rattrapage';
         originalScheduledDate?: string;
       } = req.body;
 
-      // Build exercises with computed volumes
-      const exercisesWithVolume = exercises.map((ex) => {
-        const totalVolumeKg = ex.sets.reduce(
-          (sum, s) => sum + (s.reps ?? 0) * (s.weightKg ?? 0),
-          0
-        );
-        return {
-          exerciseId: ex.exerciseId,
-          exerciseName: ex.exerciseName ?? '',
-          status: 'completed' as const,
-          sets: ex.sets.map((s, idx) => ({
-            setNumber: s.setNumber ?? idx + 1,
-            weight: s.weightKg ?? 0,
-            repsCompleted: s.reps ?? 0,
-            completed: true,
-            completedAt: s.completedAt ? new Date(s.completedAt) : new Date(),
-          })),
-          totalVolumeKg,
-          completedAt: new Date(),
-        };
-      });
+      const exerciseConfigs = await Exercise.find({ _id: { $in: exercises.map((ex) => ex.exerciseId) } })
+        .select('_id supportedLoadModes defaultLoadMode supportsAdditionalWeight')
+        .lean();
+      const configById = new Map(exerciseConfigs.map((exercise) => [String(exercise._id), exercise]));
+
+      let exercisesWithVolume;
+      try {
+        exercisesWithVolume = exercises.map((ex) => {
+          const config = configById.get(String(ex.exerciseId));
+          if (!config) throw new Error(`Exercise not found: ${ex.exerciseId}`);
+          const normalizedSets = ex.sets.map((s, idx) => {
+            const repsCompleted = Number(s.reps ?? 0);
+            if (!Number.isInteger(repsCompleted) || repsCompleted < 0 || repsCompleted > 1000) {
+              throw new Error('reps must be an integer between 0 and 1000');
+            }
+            const load = normalizeSetLoad(
+              {
+                loadMode: s.loadMode,
+                externalWeightKg: s.externalWeightKg ?? s.weightKg,
+                additionalWeightKg: s.additionalWeightKg,
+                weight: s.weightKg,
+              },
+              config as any
+            );
+            return {
+              setNumber: s.setNumber ?? idx + 1,
+              ...load,
+              repsCompleted,
+              completed: true,
+              completedAt: s.completedAt ? new Date(s.completedAt) : new Date(),
+            };
+          });
+          const totalVolumeKg = normalizedSets.reduce(
+            (sum, set) => sum + set.repsCompleted * loadVolumeKg(set),
+            0
+          );
+          return {
+            exerciseId: ex.exerciseId,
+            exerciseName: ex.exerciseName ?? '',
+            status: 'completed' as const,
+            sets: normalizedSets,
+            totalVolumeKg,
+            completedAt: new Date(),
+          };
+        });
+      } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+      }
 
       const totalSessionVolumeKg = exercisesWithVolume.reduce(
         (sum, ex) => sum + ex.totalVolumeKg,
@@ -2075,16 +2155,30 @@ router.post(
           const reps = Number(s.repsCompleted ?? s.reps ?? 0);
           return reps >= 5 && reps <= 8;
         });
-        const maxExWeight = prQualifyingSets.reduce((max: number, s: any) => Math.max(max, Number(s.weight ?? 0)), 0);
+        const maxExWeight = prQualifyingSets
+          .filter((s: any) => (s.loadMode ?? 'external_weight') === 'external_weight')
+          .reduce((max: number, s: any) => Math.max(max, Number(s.externalWeightKg ?? s.weight ?? 0)), 0);
+        const maxAdditionalWeight = prQualifyingSets
+          .filter((s: any) => s.loadMode === 'bodyweight_plus_weight')
+          .reduce((max: number, s: any) => Math.max(max, Number(s.additionalWeightKg ?? 0)), 0);
+        const maxBodyweightReps = ex.sets
+          .filter((s: any) => s.loadMode === 'bodyweight')
+          .reduce((max: number, s: any) => Math.max(max, Number(s.repsCompleted ?? 0)), 0);
         const existingHist = await ExerciseHistoryModel.findOne({ userId, exerciseId: ex.exerciseId }).lean();
         const personalRecord = Math.max(Number(existingHist?.personalRecord ?? 0), maxExWeight);
+        const personalRecords = {
+          externalWeightKg: personalRecord,
+          additionalWeightKg: Math.max(Number(existingHist?.personalRecords?.additionalWeightKg ?? 0), maxAdditionalWeight),
+          bodyweightMaxReps: Math.max(Number(existingHist?.personalRecords?.bodyweightMaxReps ?? 0), maxBodyweightReps),
+        };
 
         await ExerciseHistoryModel.findOneAndUpdate(
           { userId, exerciseId: ex.exerciseId },
           {
             $set: {
-              lastWeight: lastSet?.weight ?? 0,
+              lastWeight: lastSet ? loadVolumeKg(lastSet) : 0,
               personalRecord,
+              personalRecords,
               lastReps: ex.sets.map((s) => s.repsCompleted ?? 0),
               lastSets: ex.sets,
               lastCompletedAt: new Date(),

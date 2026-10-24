@@ -74,8 +74,8 @@ router.get(
       if (!populatedSession && dailyProgramObj.sessionTemplateId) {
         sessionIdString = dailyProgramObj.sessionTemplateId.toString();
         const template = await SessionTemplate.findById(dailyProgramObj.sessionTemplateId)
-          .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
-          .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
+          .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction supportedLoadModes defaultLoadMode supportsAdditionalWeight defaultWeight')
+          .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction supportedLoadModes defaultLoadMode supportsAdditionalWeight defaultWeight')
           .lean();
         if (template) {
           const t = template as any;
@@ -192,8 +192,8 @@ router.get(
 
       // 2) Try SessionTemplate (what /me/today returns as sessionTemplateId)
       const template = await SessionTemplate.findById(sessionId)
-        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
-        .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction')
+        .populate('items.exerciseId', 'name muscleGroup equipment difficulty description videoUrl videoSource videoFilePath videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction supportedLoadModes defaultLoadMode supportsAdditionalWeight defaultWeight')
+        .populate('items.alternatives', 'name muscleGroup equipment videoUrl videoVariants videoPosterUrl videoHlsUrl videoDurationSec imageUrl instruction message warmupInstruction supportedLoadModes defaultLoadMode supportsAdditionalWeight defaultWeight')
         .lean();
 
       if (!template) {

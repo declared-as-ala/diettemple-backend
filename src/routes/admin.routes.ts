@@ -34,9 +34,27 @@ import { enqueueExerciseVideo, enqueueLevelHomeVideo } from '../services/videoVa
 import folderRoutes from './admin/folder.routes';
 import consultationRoutes from './admin/consultation.routes';
 import Support from '../models/Support.model';
+import { LOAD_MODES, type ExerciseLoadMode } from '../utils/exerciseLoad';
 
 const router = Router();
 const LEVEL_SLUG_REGEX = /^[a-z0-9-]+$/;
+
+function exercisePayload(input: Record<string, any>): Record<string, any> {
+  const payload = { ...input };
+  if (payload.supportedLoadModes !== undefined) {
+    if (!Array.isArray(payload.supportedLoadModes)) throw new Error('supportedLoadModes must be an array');
+    const supported = Array.from(new Set(payload.supportedLoadModes)) as ExerciseLoadMode[];
+    if (supported.length === 0 || supported.some((mode) => !LOAD_MODES.includes(mode))) {
+      throw new Error('At least one valid load mode is required');
+    }
+    payload.supportedLoadModes = supported;
+    payload.supportsAdditionalWeight = supported.includes('bodyweight_plus_weight');
+    if (!payload.defaultLoadMode || !supported.includes(payload.defaultLoadMode)) {
+      payload.defaultLoadMode = supported[0];
+    }
+  }
+  return payload;
+}
 
 function toLevelSlug(input: string): string {
   return input
@@ -1612,11 +1630,11 @@ router.post(
   ],
   async (req: AuthRequest, res: Response) => {
     try {
-      const exercise = new Exercise(req.body);
+      const exercise = new Exercise(exercisePayload(req.body));
       await exercise.save();
       res.status(201).json({ exercise: serializeExerciseVideo(exercise.toObject() as any) });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(error?.name === 'ValidationError' || /load mode|required/i.test(error?.message) ? 400 : 500).json({ message: error.message });
     }
   }
 );
@@ -1632,12 +1650,12 @@ router.put(
         return res.status(404).json({ message: 'Exercise not found' });
       }
 
-      Object.assign(exercise, req.body);
+      Object.assign(exercise, exercisePayload(req.body));
       await exercise.save();
 
       res.json({ exercise: serializeExerciseVideo(exercise.toObject() as any) });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(error?.name === 'ValidationError' || /load mode|required/i.test(error?.message) ? 400 : 500).json({ message: error.message });
     }
   }
 );

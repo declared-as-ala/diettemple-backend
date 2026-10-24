@@ -17,6 +17,7 @@ import {
   isFutureOnlySession,
 } from '../services/workoutSessionWindow.service';
 import { resolveEligibleRattrapage, matchesEligibleRattrapage } from '../services/catchUp.service';
+import { loadVolumeKg, normalizeSetLoad } from '../utils/exerciseLoad';
 
 const router = express.Router();
 
@@ -138,7 +139,17 @@ router.post(
   authenticate,
   async (req: AuthRequest, res: Response) => {
     try {
-      const { workoutSessionId: rawWorkoutSessionId, exerciseId: rawExerciseId, setNumber, weight, repsCompleted, notes } = req.body;
+      const {
+        workoutSessionId: rawWorkoutSessionId,
+        exerciseId: rawExerciseId,
+        setNumber,
+        weight,
+        repsCompleted,
+        notes,
+        loadMode,
+        externalWeightKg,
+        additionalWeightKg,
+      } = req.body;
 
       const workoutSessionId = toIdString(rawWorkoutSessionId);
       const exerciseIdStr = toIdString(rawExerciseId);
@@ -167,11 +178,32 @@ router.post(
         return res.status(404).json({ message: 'Exercise not found in session' });
       }
 
+      const exerciseConfig = await Exercise.findById(exerciseIdStr)
+        .select('supportedLoadModes defaultLoadMode supportsAdditionalWeight')
+        .lean();
+      if (!exerciseConfig) return res.status(404).json({ message: 'Exercise not found' });
+      let normalizedLoad;
+      try {
+        normalizedLoad = normalizeSetLoad(
+          { loadMode, externalWeightKg, additionalWeightKg, weight },
+          exerciseConfig as any
+        );
+      } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+      }
+      const reps = Number(repsCompleted);
+      if (!Number.isInteger(reps) || reps < 0 || reps > 1000) {
+        return res.status(400).json({ message: 'repsCompleted must be an integer between 0 and 1000' });
+      }
+
       // Update the set
       const set = exerciseSession.sets.find((s) => s.setNumber === setNumber);
       if (set) {
-        set.weight = weight;
-        set.repsCompleted = repsCompleted;
+        set.weight = normalizedLoad.weight;
+        (set as any).loadMode = normalizedLoad.loadMode;
+        (set as any).externalWeightKg = normalizedLoad.externalWeightKg;
+        (set as any).additionalWeightKg = normalizedLoad.additionalWeightKg;
+        set.repsCompleted = reps;
         if (notes !== undefined) {
           set.notes = notes;
         }
@@ -181,8 +213,11 @@ router.post(
         // Create new set if doesn't exist
         exerciseSession.sets.push({
           setNumber: setNumber,
-          weight: weight,
-          repsCompleted: repsCompleted,
+          weight: normalizedLoad.weight,
+          loadMode: normalizedLoad.loadMode,
+          externalWeightKg: normalizedLoad.externalWeightKg,
+          additionalWeightKg: normalizedLoad.additionalWeightKg,
+          repsCompleted: reps,
           notes: notes || undefined,
           completed: true,
           completedAt: new Date(),
@@ -286,7 +321,7 @@ router.post(
 
       // SMART PROGRESSION LOGIC
       const exercise = exerciseSession.exerciseId as any;
-      const completedSets = exerciseSession.sets.filter(s => (s as any).completed && s.weight && s.repsCompleted);
+      const completedSets = exerciseSession.sets.filter(s => (s as any).completed && Number(s.repsCompleted ?? 0) > 0);
 
       if (completedSets.length > 0) {
         // Get coach program (if exists)
@@ -296,10 +331,10 @@ router.post(
         const targetRepsMax = typeof targetReps === 'object' ? targetReps.max : targetReps;
 
         // Calculate stats
-        const weights = completedSets.map(s => s.weight!);
+        const weights = completedSets.map(s => loadVolumeKg(s as any));
         const reps = completedSets.map(s => s.repsCompleted!);
         const lastWeight = weights[weights.length - 1];
-        const totalVolume = completedSets.reduce((sum, s) => sum + (s.weight! * s.repsCompleted!), 0);
+        const totalVolume = completedSets.reduce((sum, s) => sum + (loadVolumeKg(s as any) * s.repsCompleted!), 0);
 
         // PROGRESSION RULE 1: All sets must have >= 12 reps (or target max) to be eligible
         const allPassed = completedSets.every(s => s.repsCompleted! >= targetRepsMax);
@@ -313,11 +348,20 @@ router.post(
         // PR is valid ONLY when reps are between 5 and 8 (1-4 reps do not qualify)
         const prQualifyingSets = completedSets.filter((s) => {
           const r = Number(s.repsCompleted ?? 0);
-          return r >= 5 && r <= 8 && Number(s.weight ?? 0) > 0;
+          return r >= 5 && r <= 8 && ((s as any).loadMode ?? 'external_weight') === 'external_weight' && loadVolumeKg(s as any) > 0;
         });
         const maxQualifyingWeight = prQualifyingSets.length > 0
-          ? Math.max(...prQualifyingSets.map((s) => Number(s.weight ?? 0)))
+          ? Math.max(...prQualifyingSets.map((s) => loadVolumeKg(s as any)))
           : 0;
+        const maxAdditionalWeight = completedSets
+          .filter((s) => {
+            const repsDone = Number(s.repsCompleted ?? 0);
+            return (s as any).loadMode === 'bodyweight_plus_weight' && repsDone >= 5 && repsDone <= 8;
+          })
+          .reduce((max, s) => Math.max(max, Number((s as any).additionalWeightKg ?? s.weight ?? 0)), 0);
+        const maxBodyweightReps = completedSets
+          .filter((s) => (s as any).loadMode === 'bodyweight')
+          .reduce((max, s) => Math.max(max, Number(s.repsCompleted ?? 0)), 0);
 
         if (!history) {
           history = await ExerciseHistory.create({
@@ -325,10 +369,18 @@ router.post(
             exerciseId: exerciseIdStr,
             lastWeight: lastWeight,
             personalRecord: maxQualifyingWeight,
+            personalRecords: {
+              externalWeightKg: maxQualifyingWeight,
+              additionalWeightKg: maxAdditionalWeight,
+              bodyweightMaxReps: maxBodyweightReps,
+            },
             lastReps: reps,
             lastSets: completedSets.map((s, idx) => ({
               setNumber: idx + 1,
-              weight: s.weight!,
+              weight: loadVolumeKg(s as any),
+              loadMode: (s as any).loadMode ?? 'external_weight',
+              externalWeightKg: (s as any).externalWeightKg ?? ((s as any).loadMode ? 0 : s.weight ?? 0),
+              additionalWeightKg: (s as any).additionalWeightKg ?? 0,
               reps: s.repsCompleted!,
               completed: true,
               completedAt: s.completedAt || new Date(),
@@ -343,10 +395,18 @@ router.post(
           if (maxQualifyingWeight > 0) {
             history.personalRecord = Math.max(Number(history.personalRecord ?? 0), maxQualifyingWeight);
           }
+          (history as any).personalRecords = {
+            externalWeightKg: Math.max(Number((history as any).personalRecords?.externalWeightKg ?? history.personalRecord ?? 0), maxQualifyingWeight),
+            additionalWeightKg: Math.max(Number((history as any).personalRecords?.additionalWeightKg ?? 0), maxAdditionalWeight),
+            bodyweightMaxReps: Math.max(Number((history as any).personalRecords?.bodyweightMaxReps ?? 0), maxBodyweightReps),
+          };
           history.lastReps = reps;
           history.lastSets = completedSets.map((s, idx) => ({
             setNumber: idx + 1,
-            weight: s.weight!,
+            weight: loadVolumeKg(s as any),
+            loadMode: (s as any).loadMode ?? 'external_weight',
+            externalWeightKg: (s as any).externalWeightKg ?? ((s as any).loadMode ? 0 : s.weight ?? 0),
+            additionalWeightKg: (s as any).additionalWeightKg ?? 0,
             reps: s.repsCompleted!,
             completed: true,
             completedAt: s.completedAt || new Date(),
@@ -536,6 +596,7 @@ router.get(
         history: history ? {
           lastWeight: history.lastWeight,
           personalRecord: personalRecord,
+          personalRecords: (history as any).personalRecords,
           lastReps: history.lastReps,
           lastSets: history.lastSets,
           lastCompletedAt: history.lastCompletedAt,
@@ -547,6 +608,9 @@ router.get(
           name: exercise.name,
           muscleGroup: exercise.muscleGroup,
           defaultWeight: exercise.defaultWeight,
+          supportedLoadModes: (exercise as any).supportedLoadModes,
+          defaultLoadMode: (exercise as any).defaultLoadMode,
+          supportsAdditionalWeight: (exercise as any).supportsAdditionalWeight,
         } : null,
       });
     } catch (error: any) {
