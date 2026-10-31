@@ -41,7 +41,10 @@ async function requestOpenFoodFacts(barcode: string): Promise<BarcodeProduct | n
     );
     if (!response.ok) return null;
     const data: any = await response.json();
-    if (data?.status !== 1 || !data.product) return null;
+    // Open Food Facts v3 currently returns status: "success" (older responses used 1).
+    // Accept both forms so valid products are not mistaken for missing ones.
+    const found = data?.status === 1 || data?.status === 'success' || data?.result?.id === 'product_found';
+    if (!found || !data.product) return null;
     const product = data.product;
     const nutriments = product.nutriments || {};
     const kcal = num(nutriments['energy-kcal_100g'] ?? nutriments['energy-kcal_value'] ?? nutriments.energy_kcal_100g);
