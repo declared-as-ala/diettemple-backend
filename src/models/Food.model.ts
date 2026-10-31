@@ -22,6 +22,11 @@ export interface IFood extends Document {
   /** Normalised (lowercase, no accents) names + aliases, used for matching. Built by the seed/catalog. */
   searchKeys?: string[];
   cuisine?: string;
+  /** Packaged-product identifier. Present only for verified barcode lookups. */
+  barcode?: string;
+  brand?: string;
+  imageUrl?: string;
+  provider?: 'catalog' | 'open_food_facts' | 'usda' | 'manual';
   macrosPer100g: {
     kcal: number;
     protein: number;
@@ -63,6 +68,10 @@ const FoodSchema = new Schema(
     synonyms: [{ type: String }],
     searchKeys: [{ type: String, index: true }],
     cuisine: { type: String, index: true },
+    barcode: { type: String, sparse: true, unique: true, index: true },
+    brand: { type: String },
+    imageUrl: { type: String },
+    provider: { type: String, enum: ['catalog', 'open_food_facts', 'usda', 'manual'], default: 'catalog' },
     macrosPer100g: {
       kcal: { type: Number, required: true },
       protein: { type: Number, required: true },

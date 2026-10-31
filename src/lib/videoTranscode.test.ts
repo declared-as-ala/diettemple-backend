@@ -3,13 +3,13 @@ import { LADDER, buildMasterPlaylist, buildMp4Args, buildHlsArgs, contentTypeFor
 
 describe('video ladder', () => {
   it('never upscales: keeps rungs that fit the source, always at least the smallest', () => {
-    expect(selectRungs(1080, 1920).map((r) => r.key)).toEqual(['240', '360', '540']);
-    expect(selectRungs(1920, 1080).map((r) => r.key)).toEqual(['240', '360', '540']); // landscape
-    expect(selectRungs(480, 640).map((r) => r.key)).toEqual(['240', '360']);
+    expect(selectRungs(1080, 1920).map((r) => r.key)).toEqual(['240', '720']);
+    expect(selectRungs(1920, 1080).map((r) => r.key)).toEqual(['240', '720']); // landscape
+    expect(selectRungs(480, 640).map((r) => r.key)).toEqual(['240']);
     expect(selectRungs(200, 200).map((r) => r.key)).toEqual(['240']);
   });
-  it('bitrate budget: top rung stays under 1 Mbps incl. audio so a 1 Mbps link can play it', () => {
-    for (const r of LADDER) expect(r.maxrateK + 48).toBeLessThan(1000);
+  it('keeps the fallback lightweight while retaining a true HD rendition', () => {
+    expect(LADDER.find((r) => r.key === '720')?.longSide).toBe(1280);
     expect(LADDER[0].maxrateK).toBeLessThanOrEqual(350); // lowest rung usable on very slow links
   });
   it('scale filter is orientation independent and keeps even dimensions', () => {
@@ -43,17 +43,16 @@ describe('ffmpeg arguments', () => {
 
 describe('HLS master playlist', () => {
   const pl = buildMasterPlaylist([
-    { key: '540', width: 540, height: 960, bitrateKbps: 637 },
+    { key: '720', width: 720, height: 1280, bitrateKbps: 1400 },
     { key: '240', width: 240, height: 426, bitrateKbps: 183 },
-    { key: '360', width: 360, height: 640, bitrateKbps: 346 },
   ]);
   it('lists variants low -> high with PEAK bandwidth, resolution and codecs', () => {
     expect(pl.startsWith('#EXTM3U')).toBe(true);
     const bw = [...pl.matchAll(/STREAM-INF:BANDWIDTH=(\d+),/g)].map((m) => Number(m[1]));
-    expect(bw).toEqual([278000, 528000, 948000]); // maxrate + 48 kbps audio
-    expect([...pl.matchAll(/^(\d+)\/index\.m3u8$/gm)].map((m) => m[1])).toEqual(['240', '360', '540']);
+    expect(bw).toEqual([278000, 1848000]); // maxrate + 48 kbps audio
+    expect([...pl.matchAll(/^(\d+)\/index\.m3u8$/gm)].map((m) => m[1])).toEqual(['240', '720']);
     expect(pl).toContain('CODECS="avc1.4d401f,mp4a.40.2"');
-    expect(pl).toContain('RESOLUTION=360x640');
+    expect(pl).toContain('RESOLUTION=720x1280');
   });
 });
 

@@ -21,7 +21,7 @@ const THREADS = process.env.VIDEO_FFMPEG_THREADS || '2';
 const STEP_TIMEOUT_MS = parseInt(process.env.VIDEO_FFMPEG_TIMEOUT_MS || '600000', 10) || 600_000;
 const AUDIO_KBPS = 48;
 
-export type RungKey = '240' | '360' | '540';
+export type RungKey = '240' | '720';
 export interface Rung {
   key: RungKey;
   /** Length of the LONGEST side in px (orientation independent: portrait 240p = 240x426). */
@@ -31,11 +31,10 @@ export interface Rung {
   bufK: number;
 }
 
-/** Tuned on a real 1080x1920 HEVC exercise clip: ~180 / 340 / 620 kbps average. */
+/** 240p fallback plus a true 720p HD rendition. Legacy 360p/540p variants are not generated for new uploads. */
 export const LADDER: Rung[] = [
   { key: '240', longSide: 426, crf: 30, maxrateK: 230, bufK: 460 },
-  { key: '360', longSide: 640, crf: 28, maxrateK: 480, bufK: 960 },
-  { key: '540', longSide: 960, crf: 27, maxrateK: 900, bufK: 1800 },
+  { key: '720', longSide: 1280, crf: 24, maxrateK: 1800, bufK: 3600 },
 ];
 
 export interface ProbeResult {

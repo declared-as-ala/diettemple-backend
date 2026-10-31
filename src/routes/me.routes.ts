@@ -672,6 +672,21 @@ function parseDateKey(dateKey: string): Date {
   return d;
 }
 
+function nutritionTotals(entries: any[]) {
+  return entries.reduce(
+    (acc, entry) => {
+      for (const item of entry?.items || []) {
+        acc.calories += Number(item.kcal) || 0;
+        acc.proteinG += Number(item.protein) || 0;
+        acc.carbsG += Number(item.carbs) || 0;
+        acc.fatG += Number(item.fat) || 0;
+      }
+      return acc;
+    },
+    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 }
+  );
+}
+
 // GET /api/me/nutrition/today?date=YYYY-MM-DD — per-day totals only; no log for date = 0 consumed
 router.get(
   '/nutrition/today',
@@ -730,6 +745,7 @@ router.get(
               waterMl: (log as any).waterMl,
               completedMealsIds: (log as any).completedMealsIds,
               status: (log as any).status,
+              entries: (log as any).entries || [],
             }
           : null,
       });
@@ -858,6 +874,7 @@ router.post(
   [
     param('dateKey').matches(/^\d{4}-\d{2}-\d{2}$/),
     body('photoUrl').optional().isString(),
+    body('mealType').optional().isIn(['breakfast', 'lunch', 'dinner', 'snack']),
     body('items').isArray(),
     body('items.*.name').notEmpty(),
     body('items.*.grams').isNumeric(),
@@ -911,6 +928,7 @@ router.post(
         entryId,
         source: 'scan' as const,
         photoUrl,
+        mealType: req.body.mealType || 'snack',
         items,
         createdAt: new Date(),
       };
@@ -946,6 +964,61 @@ router.post(
     }
   }
 );
+
+// Entry lifecycle for the food diary. Entries remain scoped to the authenticated user/date.
+router.patch('/nutrition/logs/:dateKey/:entryId', [param('dateKey').matches(/^\d{4}-\d{2}-\d{2}$/), body('mealType').isIn(['breakfast', 'lunch', 'dinner', 'snack'])], async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return res.status(401).json({ message: 'Unauthorized' });
+    const date = parseDateKey(req.params.dateKey);
+    const log: any = await DailyNutritionLog.findOne({ userId: req.user._id, date });
+    if (!log) return res.status(404).json({ message: 'Entrée introuvable.' });
+    const entry = (log.entries || []).find((e: any) => String(e.entryId) === req.params.entryId);
+    if (!entry) return res.status(404).json({ message: 'Entrée introuvable.' });
+    entry.mealType = req.body.mealType;
+    await log.save();
+    return res.json({ log, entryId: req.params.entryId });
+  } catch (e: unknown) {
+    return res.status(500).json({ message: (e as Error).message });
+  }
+});
+
+router.post('/nutrition/logs/:dateKey/:entryId/duplicate', [param('dateKey').matches(/^\d{4}-\d{2}-\d{2}$/)], async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return res.status(401).json({ message: 'Unauthorized' });
+    const date = parseDateKey(req.params.dateKey);
+    const log: any = await DailyNutritionLog.findOne({ userId: req.user._id, date });
+    const source = (log?.entries || []).find((e: any) => String(e.entryId) === req.params.entryId);
+    if (!log || !source) return res.status(404).json({ message: 'Entrée introuvable.' });
+    const mongoose = (await import('mongoose')).default;
+    log.entries.push({ ...source.toObject?.() || source, entryId: new mongoose.Types.ObjectId(), createdAt: new Date() });
+    const totals = nutritionTotals(log.entries);
+    log.consumedCalories = Math.round(totals.calories);
+    log.consumedMacros = { proteinG: Math.round(totals.proteinG * 10) / 10, carbsG: Math.round(totals.carbsG * 10) / 10, fatG: Math.round(totals.fatG * 10) / 10 };
+    await log.save();
+    return res.status(201).json({ log, entryId: String(log.entries[log.entries.length - 1].entryId) });
+  } catch (e: unknown) {
+    return res.status(500).json({ message: (e as Error).message });
+  }
+});
+
+router.delete('/nutrition/logs/:dateKey/:entryId', [param('dateKey').matches(/^\d{4}-\d{2}-\d{2}$/)], async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?._id) return res.status(401).json({ message: 'Unauthorized' });
+    const date = parseDateKey(req.params.dateKey);
+    const log: any = await DailyNutritionLog.findOne({ userId: req.user._id, date });
+    if (!log) return res.status(404).json({ message: 'Entrée introuvable.' });
+    const before = log.entries.length;
+    log.entries = log.entries.filter((e: any) => String(e.entryId) !== req.params.entryId);
+    if (before === log.entries.length) return res.status(404).json({ message: 'Entrée introuvable.' });
+    const totals = nutritionTotals(log.entries);
+    log.consumedCalories = Math.round(totals.calories);
+    log.consumedMacros = { proteinG: Math.round(totals.proteinG * 10) / 10, carbsG: Math.round(totals.carbsG * 10) / 10, fatG: Math.round(totals.fatG * 10) / 10 };
+    await log.save();
+    return res.json({ log });
+  } catch (e: unknown) {
+    return res.status(500).json({ message: (e as Error).message });
+  }
+});
 
 // POST /api/me/nutrition/log
 router.post(

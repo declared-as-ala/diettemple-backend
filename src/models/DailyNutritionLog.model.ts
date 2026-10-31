@@ -20,6 +20,7 @@ export interface ILogEntry {
   entryId: mongoose.Types.ObjectId;
   source: 'scan' | 'manual';
   photoUrl?: string;
+  mealType?: 'breakfast' | 'lunch' | 'dinner' | 'snack';
   items: ILogEntryItem[];
   createdAt: Date;
 }
@@ -60,6 +61,7 @@ const LogEntrySchema = new Schema(
     entryId: { type: Schema.Types.ObjectId, required: true, default: () => new mongoose.Types.ObjectId() },
     source: { type: String, enum: ['scan', 'manual'], default: 'scan' },
     photoUrl: String,
+    mealType: { type: String, enum: ['breakfast', 'lunch', 'dinner', 'snack'], default: 'snack' },
     items: [LogEntryItemSchema],
     createdAt: { type: Date, default: Date.now },
   },
