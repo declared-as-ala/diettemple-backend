@@ -85,7 +85,9 @@ function computeDecision(
   const strongDrop = previousWorkingSet ? previousWorkingSet.reps - lastWorkingSet.reps >= 4 : false;
   const previousCloseToTarget = previousWorkingSet ? previousWorkingSet.reps >= targetRange.min : true;
 
-  if (lastWorkingSet.reps >= targetRange.max && previousCloseToTarget) {
+  // 12 reps or more means the load is too light, even when the target range goes higher
+  const advanceReps = Math.min(targetRange.max, 12);
+  if (lastWorkingSet.reps >= advanceReps && previousCloseToTarget) {
     const next = roundToStep(lastWorkingSet.weight + step);
     return {
       decision: 'ADVANCE',
