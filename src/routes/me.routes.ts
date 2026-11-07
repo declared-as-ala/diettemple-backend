@@ -1967,8 +1967,8 @@ router.post(
       const lastSet = normalizedSets[normalizedSets.length - 1];
       const totalVolume = normalizedSets.reduce((sum, s) => sum + s.reps * loadVolumeKg(s), 0);
 
-      // PR is valid ONLY when reps are between 5 and 8 (1-4 reps do not qualify)
-      const prQualifyingSets = normalizedSets.filter((s) => s.reps >= 5 && s.reps <= 8);
+      // PR is valid ONLY when reps are 8 or more
+      const prQualifyingSets = normalizedSets.filter((s) => s.reps >= 8);
       const maxExternalWeight = prQualifyingSets
         .filter((s) => s.loadMode === 'external_weight')
         .reduce((max, s) => Math.max(max, s.externalWeightKg), 0);
@@ -2223,10 +2223,10 @@ router.post(
       for (const ex of exercisesWithVolume) {
         if (!ex.exerciseId) continue;
         const lastSet = ex.sets[ex.sets.length - 1];
-        // PR is valid ONLY when reps are between 5 and 8
+        // PR is valid ONLY when reps are 8 or more
         const prQualifyingSets = ex.sets.filter((s: any) => {
           const reps = Number(s.repsCompleted ?? s.reps ?? 0);
-          return reps >= 5 && reps <= 8;
+          return reps >= 8;
         });
         const maxExWeight = prQualifyingSets
           .filter((s: any) => (s.loadMode ?? 'external_weight') === 'external_weight')
