@@ -4,9 +4,9 @@
   "description": "DietTemple Backend API",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "dev": "node init && ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "node init && tsc",
+    "start": "node init && node dist/index.js",
     "check-mongo": "node scripts/start-mongo.js",
     "seed:products": "ts-node src/scripts/seedProducts.ts",
     "seed:training": "ts-node src/scripts/seedTraining.ts",

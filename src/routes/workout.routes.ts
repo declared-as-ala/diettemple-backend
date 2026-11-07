@@ -337,7 +337,8 @@ router.post(
         const totalVolume = completedSets.reduce((sum, s) => sum + (loadVolumeKg(s as any) * s.repsCompleted!), 0);
 
         // PROGRESSION RULE 1: All sets must have >= 12 reps (or target max) to be eligible
-        const allPassed = completedSets.every(s => s.repsCompleted! >= targetRepsMax);
+        // 12+ reps on any set means the load is too light -> recommend an increase, even if not every set hit the max.
+        const allPassed = completedSets.every(s => s.repsCompleted! >= targetRepsMax) || completedSets.some(s => s.repsCompleted! >= 12);
 
         // Find or create exercise history
         let history = await ExerciseHistory.findOne({
@@ -345,10 +346,10 @@ router.post(
           exerciseId: exerciseIdStr,
         });
 
-        // PR is valid ONLY when reps are between 5 and 8 (1-4 reps do not qualify)
+        // PR is valid ONLY when reps are 8 or more
         const prQualifyingSets = completedSets.filter((s) => {
           const r = Number(s.repsCompleted ?? 0);
-          return r >= 5 && r <= 8 && ((s as any).loadMode ?? 'external_weight') === 'external_weight' && loadVolumeKg(s as any) > 0;
+          return r >= 8 && ((s as any).loadMode ?? 'external_weight') === 'external_weight' && loadVolumeKg(s as any) > 0;
         });
         const maxQualifyingWeight = prQualifyingSets.length > 0
           ? Math.max(...prQualifyingSets.map((s) => loadVolumeKg(s as any)))
@@ -356,7 +357,7 @@ router.post(
         const maxAdditionalWeight = completedSets
           .filter((s) => {
             const repsDone = Number(s.repsCompleted ?? 0);
-            return (s as any).loadMode === 'bodyweight_plus_weight' && repsDone >= 5 && repsDone <= 8;
+            return (s as any).loadMode === 'bodyweight_plus_weight' && repsDone >= 8;
           })
           .reduce((max, s) => Math.max(max, Number((s as any).additionalWeightKg ?? s.weight ?? 0)), 0);
         const maxBodyweightReps = completedSets
