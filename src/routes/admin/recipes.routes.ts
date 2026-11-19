@@ -31,6 +31,17 @@ function recipeToJson(r: any) {
     servings: r.servings ?? null,
     storageInstructions: r.storageInstructions ?? null,
     ingredients: r.ingredients || [],
+    // Managed-import metadata (absent on legacy / hand-made recipes). `status`: published | review | archived.
+    status: r.status ?? 'published',
+    slug: r.slug ?? null,
+    datasetId: r.datasetId ?? null,
+    sourceRef: r.sourceRef ?? null,
+    fiber: r.fiber ?? null,
+    instructions: r.instructions || [],
+    notes: r.notes || [],
+    servingLabel: r.servingLabel ?? null,
+    macrosApproximate: !!r.macrosApproximate,
+    reviewFlags: r.reviewFlags || [],
   };
 }
 

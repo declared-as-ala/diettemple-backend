@@ -60,7 +60,9 @@ export function calculateIngredientMatch(
 }
 
 export function buildRecipeQuery(filters: RecipeFilterParams): Record<string, unknown> {
-  const query: Record<string, unknown> = {};
+  // Public catalogue: never archived (replaced) or under-review recipes. Legacy docs without a status stay visible
+  // until the managed import archives them, so a failed import never empties the catalogue.
+  const query: Record<string, unknown> = { status: { $nin: ['archived', 'review'] } };
   if (filters.maxPreparationTime != null && Number.isFinite(filters.maxPreparationTime)) {
     query.preparationTimeMinutes = { $lte: filters.maxPreparationTime };
   }

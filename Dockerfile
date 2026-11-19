@@ -34,6 +34,8 @@ RUN npm install --legacy-peer-deps --only=production
 
 # Copy built code and required assets
 COPY --from=builder /app/dist ./dist
+# Recipe photos (read at runtime by the recipe seed and uploaded to MinIO) — tsc does not copy non-code files
+COPY --from=builder /app/src/data/recipes/recipeImages ./dist/data/recipes/recipeImages
 COPY public ./public
 COPY scripts ./scripts
 # Copy json data files in case they are used at runtime

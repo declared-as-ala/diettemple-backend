@@ -71,7 +71,8 @@ function computeFill(calories: number, protein?: unknown, carbs?: unknown, fat?:
 }
 
 export async function seedRecipeMacros(): Promise<void> {
-  const all = await Recipe.find({}).lean();
+  // Never touch managed (dataset) recipes: their macros come from the source document and must not be derived.
+  const all = await Recipe.find({ datasetId: { $exists: false }, status: { $ne: 'archived' } }).lean();
   let updated = 0;
   for (const r of all) {
     const doc = r as any;

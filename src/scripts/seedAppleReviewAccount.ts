@@ -81,7 +81,7 @@ async function seedReviewAccount(email: string): Promise<void> {
   await seedExerciseHistory(email);
 
   // 6. A few recipe favorites (idempotent via unique userId+recipeId index).
-  const recipes = await Recipe.find().limit(4).select('_id').lean();
+  const recipes = await Recipe.find({ status: 'published' }).limit(4).select('_id').lean();
   let favorites = 0;
   for (const r of recipes as any[]) {
     const existing = await RecipeFavorite.findOne({ userId: user._id, recipeId: r._id }).lean();

@@ -1,8 +1,52 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import Recipe from '../models/Recipe.model';
 import { buildRecipeQuery, calculateIngredientMatch, normalizeIngredientName, type IngredientMatchMode } from '../services/recipeFilter.service';
 
 const router = Router();
+
+/** Fields added by the managed recipe import (all optional: legacy recipes simply don't have them). */
+function publicRecipeExtras(r: any) {
+  return {
+    ...(r.slug ? { slug: r.slug } : {}),
+    ...(r.fiber != null ? { fiber: r.fiber } : {}),
+    ...(Array.isArray(r.instructions) && r.instructions.length ? { instructions: r.instructions } : {}),
+    ...(Array.isArray(r.notes) && r.notes.length ? { notes: r.notes } : {}),
+    ...(r.servingLabel ? { servingLabel: r.servingLabel } : {}),
+    ...(r.macrosApproximate ? { macrosApproximate: true } : {}),
+    ...(r.nutritionOriginal ? { nutritionOriginal: r.nutritionOriginal } : {}),
+    ...(Array.isArray(r.images) && r.images.length ? { images: r.images } : {}),
+  };
+}
+
+function toPublicRecipe(r: any) {
+  const rawIngredients = Array.isArray(r.ingredients) ? r.ingredients : [];
+  return {
+    _id: r._id.toString(),
+    title: r.title,
+    calories: r.calories,
+    protein: r.protein,
+    carbs: r.carbs,
+    fat: r.fat,
+    imageUrl: r.imageUrl,
+    tags: r.tags || [],
+    videoSource: r.videoSource,
+    videoUrl: r.videoUrl,
+    posterUrl: r.posterUrl,
+    preparationTimeMinutes: r.preparationTimeMinutes ?? null,
+    preparationTimeLabel: r.preparationTimeLabel ?? null,
+    mealPrepDays: r.mealPrepDays || [],
+    isBatchCookingFriendly: !!r.isBatchCookingFriendly,
+    servings: r.servings ?? null,
+    storageInstructions: r.storageInstructions ?? null,
+    ingredients: rawIngredients.map((ing: any) =>
+      typeof ing === 'string'
+        ? { name: ing, normalizedName: normalizeIngredientName(ing) }
+        : { name: ing?.name ?? '', normalizedName: ing?.normalizedName || normalizeIngredientName(ing?.name || ''), quantity: ing?.quantity, unit: ing?.unit }
+    ),
+    ...publicRecipeExtras(r),
+  };
+}
 
 const QUERY_TIMEOUT_MS = 10_000;
 const MAX_RECIPES_LIST = 100;
@@ -65,6 +109,7 @@ router.get('/', async (req, res) => {
         storageInstructions: r.storageInstructions ?? null,
         ingredients: normalizedIngredients,
         ingredientMatch,
+        ...publicRecipeExtras(r),
       };
     });
 
@@ -93,6 +138,19 @@ router.get('/', async (req, res) => {
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
     });
+  } catch (e: unknown) {
+    res.status(500).json({ error: 'error', message: (e as Error).message });
+  }
+});
+
+// GET /api/recipes/:id — one recipe. Archived (replaced) recipes still resolve so favorites/history stay readable;
+// recipes under review are never exposed.
+router.get('/:id', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Identifiant invalide.' });
+    const r: any = await Recipe.findOne({ _id: req.params.id, status: { $ne: 'review' } }).maxTimeMS(QUERY_TIMEOUT_MS).lean();
+    if (!r) return res.status(404).json({ message: 'Recette introuvable.' });
+    res.json({ recipe: { ...toPublicRecipe(r), ...(r.status === 'archived' ? { archived: true } : {}) } });
   } catch (e: unknown) {
     res.status(500).json({ error: 'error', message: (e as Error).message });
   }

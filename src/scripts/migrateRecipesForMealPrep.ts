@@ -9,7 +9,7 @@ async function run() {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is required');
   await mongoose.connect(uri);
-  const recipes = await Recipe.find();
+  const recipes = await Recipe.find({ datasetId: { $exists: false } });
   let updated = 0;
 
   for (const recipe of recipes) {

@@ -1,16 +1,55 @@
 name: Deploy Backend
 
+# Local push -> checks -> build image -> backup DB -> deploy -> migrations + recipe seed -> verification (-> rollback on failure)
+
 on:
   push:
     branches:
       - main
       - master
+  workflow_dispatch:
+
+# Never two production deployments at once (the seed must not run twice in parallel).
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
+  API_URL: https://api.diettemple.tn
 
 jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 1. Quality gate: type-check + build + recipe dataset / schema validation.
+  #    Nothing is deployed if this fails.
+  # ───────────────────────────────────────────────────────────────────────────
+  checks:
+    name: Checks (build + recipe dataset validation)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Recipe dataset, seed logic and filters (no database needed)
+        run: npx jest --runInBand src/data/recipes src/services/recipeFilter.service.test.ts
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 2. Build and publish the backend image.
+  # ───────────────────────────────────────────────────────────────────────────
   build-and-push:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,6 +85,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3. Deploy: BACKUP FIRST, then new image, then migrations and the recipe seed.
+  #    The job fails (and nothing is reported as successful) if any step fails.
+  # ───────────────────────────────────────────────────────────────────────────
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -69,33 +112,111 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           envs: DOCKER_COMPOSE_B64,CADDYFILE_B64
+          script_stop: true
           script: |
+            set -euo pipefail
             mkdir -p /app/diettemple
             cd /app/diettemple
-            
+
             # Write configuration files directly
             echo "$DOCKER_COMPOSE_B64" | base64 -d > docker-compose.yml
             echo "$CADDYFILE_B64" | base64 -d > Caddyfile
-            
+
             # Log in to GitHub Container Registry
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-            
+
             # Make sure directories and environment file exist
-            mkdir -p backend
+            mkdir -p backend backups
             touch backend/.env
-            
-            # Pull only the backend service and restart it
+
+            # ── 1. Database must be running, then BACKUP before anything changes ──────────────
+            docker compose up -d mongodb
+            sleep 3
+            STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+            BACKUP="backups/pre-deploy-${STAMP}.archive.gz"
+            docker exec diettemple_mongodb mongodump --archive=/tmp/pre-deploy.archive.gz --gzip
+            docker cp diettemple_mongodb:/tmp/pre-deploy.archive.gz "$BACKUP"
+            docker exec diettemple_mongodb rm -f /tmp/pre-deploy.archive.gz
+            gzip -t "$BACKUP"                      # archive must be a valid gzip
+            test "$(stat -c %s "$BACKUP")" -gt 1024  # and not empty
+            echo "Database backup OK: $BACKUP ($(du -h "$BACKUP" | cut -f1))"
+            # keep the 7 most recent backups
+            ls -1t backups/pre-deploy-*.archive.gz | tail -n +8 | xargs -r rm -f
+
+            # ── 2. New backend image ──────────────────────────────────────────────────────────
             docker compose pull backend
             docker compose up -d backend
-            
-            # Start database if not running
             docker compose up -d mongodb caddy
-            
-            # Seed products after backend is ready
-            echo "Waiting for backend to be ready..."
-            sleep 5
-            docker exec diettemple_backend node dist/scripts/backfillSubscriptionPlanAssignments.js
+
+            echo "Waiting for backend to be healthy..."
+            for i in $(seq 1 40); do
+              if docker exec diettemple_backend node -e "fetch('http://localhost:5000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+                echo "Backend healthy after ~$((i*3))s"
+                break
+              fi
+              if [ "$i" -eq 40 ]; then
+                echo "Backend did not become healthy" >&2
+                docker logs --tail 60 diettemple_backend >&2 || true
+                exit 1
+              fi
+              sleep 3
+            done
+
+            # ── 3. Migrations (existing) ──────────────────────────────────────────────────────
+            # Pre-existing step: it never blocked a deployment before, so it stays non-blocking (but a failure is now visible).
+            docker exec diettemple_backend node dist/scripts/backfillSubscriptionPlanAssignments.js || echo "::warning::backfillSubscriptionPlanAssignments failed (non-blocking)"
             docker exec diettemple_backend node dist/scripts/seedProducts.js || echo "Seed products skipped (might already exist or DB not ready)"
+
+            # ── 4. Recipe catalogue: validate (dry run) -> apply -> verify ────────────────────
+            # --apply validates the dataset, uploads the photos, publishes the new recipes and ARCHIVES (never deletes)
+            # the legacy ones; on any failure it restores the previous catalogue by itself.
+            docker exec diettemple_backend node dist/scripts/seedRecipes.js
+            docker exec diettemple_backend node dist/scripts/seedRecipes.js --apply
+            if ! docker exec diettemple_backend node dist/scripts/seedRecipes.js --verify --check-storage --base-url http://localhost:5000; then
+              echo "Recipe verification failed: restoring the previous catalogue" >&2
+              docker exec diettemple_backend node dist/scripts/seedRecipes.js --rollback
+              exit 1
+            fi
 
             # Cleanup old Docker images
             docker image prune -f
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 4. Final gate: the PUBLIC site (through the reverse proxy, like the mobile app).
+  # ───────────────────────────────────────────────────────────────────────────
+  verify:
+    name: Verify production (public API + photos)
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Public recipe API and photos
+        run: node scripts/verify-recipes-public.mjs "$API_URL"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 5. If the public check fails after a successful deploy, bring the previous catalogue back.
+  # ───────────────────────────────────────────────────────────────────────────
+  rollback-recipes:
+    name: Rollback recipe catalogue
+    needs: [deploy, verify]
+    if: ${{ always() && needs.deploy.result == 'success' && needs.verify.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore the previous recipe catalogue
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 178.105.255.135
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            docker exec diettemple_backend node dist/scripts/seedRecipes.js --rollback
+            echo "Previous recipe catalogue restored. Database backups are in /app/diettemple/backups"
