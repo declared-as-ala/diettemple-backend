@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { authenticate } from '../middleware/auth.middleware';
 import WorkoutSession from '../models/WorkoutSession.model';
 import ExerciseProgression from '../models/ExerciseProgression.model';
+import { shouldKeepRicherHistory } from '../utils/exerciseHistoryGuard';
 import ExerciseHistory from '../models/ExerciseHistory.model';
 import ExerciseProgram from '../models/ExerciseProgram.model';
 import Session from '../models/Session.model';
@@ -391,8 +392,15 @@ router.post(
             progressionStatus: allPassed ? 'eligible' : 'failed',
           });
         } else {
-          // Update history
-          history.lastWeight = lastWeight;
+          // Update history.
+          // Race guard: the app saves the history after every set; if this "complete" request overtakes the last set's
+          // save it sees one set fewer and must not overwrite the more complete history (see exerciseHistoryGuard.ts).
+          const keepRicherSets = shouldKeepRicherHistory(
+            Array.isArray(history.lastSets) ? history.lastSets.length : 0,
+            completedSets.length,
+            history.lastCompletedAt
+          );
+          if (!keepRicherSets) history.lastWeight = lastWeight;
           if (maxQualifyingWeight > 0) {
             history.personalRecord = Math.max(Number(history.personalRecord ?? 0), maxQualifyingWeight);
           }
@@ -401,27 +409,29 @@ router.post(
             additionalWeightKg: Math.max(Number((history as any).personalRecords?.additionalWeightKg ?? 0), maxAdditionalWeight),
             bodyweightMaxReps: Math.max(Number((history as any).personalRecords?.bodyweightMaxReps ?? 0), maxBodyweightReps),
           };
-          history.lastReps = reps;
-          history.lastSets = completedSets.map((s, idx) => ({
-            setNumber: idx + 1,
-            weight: loadVolumeKg(s as any),
-            loadMode: (s as any).loadMode ?? 'external_weight',
-            externalWeightKg: (s as any).externalWeightKg ?? ((s as any).loadMode ? 0 : s.weight ?? 0),
-            additionalWeightKg: (s as any).additionalWeightKg ?? 0,
-            reps: s.repsCompleted!,
-            completed: true,
-            completedAt: s.completedAt || new Date(),
-          }));
+          if (!keepRicherSets) {
+            history.lastReps = reps;
+            history.lastSets = completedSets.map((s, idx) => ({
+              setNumber: idx + 1,
+              weight: loadVolumeKg(s as any),
+              loadMode: (s as any).loadMode ?? 'external_weight',
+              externalWeightKg: (s as any).externalWeightKg ?? ((s as any).loadMode ? 0 : s.weight ?? 0),
+              additionalWeightKg: (s as any).additionalWeightKg ?? 0,
+              reps: s.repsCompleted!,
+              completed: true,
+              completedAt: s.completedAt || new Date(),
+            }));
+            history.totalVolume = totalVolume;
+          }
           history.lastCompletedAt = new Date();
-          history.totalVolume = totalVolume;
 
           // PROGRESSION RULE 2: Recommend weight increase only if eligible
           if (allPassed) {
             history.progressionStatus = 'eligible';
-            history.recommendedNextWeight = lastWeight + 2; // +2kg recommendation
+            history.recommendedNextWeight = (keepRicherSets ? Number(history.lastWeight ?? lastWeight) : lastWeight) + 2; // +2kg recommendation
           } else {
             history.progressionStatus = 'failed';
-            history.recommendedNextWeight = lastWeight; // Stay same weight
+            history.recommendedNextWeight = keepRicherSets ? Number(history.lastWeight ?? lastWeight) : lastWeight; // Stay same weight
           }
 
           await history.save();
