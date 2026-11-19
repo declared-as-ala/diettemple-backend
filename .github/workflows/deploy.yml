@@ -30,6 +30,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Runs BEFORE any npm script / jest: those execute config files, so a poisoned one must never reach them.
+      - name: Security gate (refuse the known obfuscated payload)
+        run: |
+          if git grep -nE "_0x[0-9a-f]{4,6}|global\.i *= *'|node init" -- . ':!node_modules' ':!package-lock.json' ':!.github'; then
+            echo "::error::Known malicious payload markers found in the repository. Refusing to run anything."
+            exit 1
+          fi
+          # A payload can hide behind a long run of whitespace: no config/script file may have a huge line.
+          LONG=$(git ls-files '*.config.js' '*.config.mjs' '*.config.cjs' '*.config.ts' init api.js             | xargs -r awk 'length($0) > 2000 { print FILENAME ": line " FNR " has " length($0) " chars" }')
+          if [ -n "$LONG" ]; then
+            echo "$LONG"
+            echo "::error::Abnormally long line in a config/script file (possible hidden payload)."
+            exit 1
+          fi
+          echo "Security gate passed."
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
