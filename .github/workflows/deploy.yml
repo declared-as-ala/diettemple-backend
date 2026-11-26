@@ -26,6 +26,14 @@ jobs:
   checks:
     name: Checks (build + recipe dataset validation)
     runs-on: ubuntu-latest
+    # A real MongoDB for the integration tests (invitations: unique indexes, atomic activation, expiry...).
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_TEST_URI: mongodb://localhost:27017/dt_ci_test
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -58,8 +66,14 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
-      - name: Recipe dataset, seed logic and filters (no database needed)
-        run: npx jest --runInBand src/data/recipes src/services/recipeFilter.service.test.ts
+      - name: Tests (recipes, history guard, client invitations incl. real-database integration)
+        run: >
+          npx jest --runInBand
+          src/data/recipes
+          src/services/recipeFilter.service.test.ts
+          src/utils/exerciseHistoryGuard.test.ts
+          src/services/invitation.unit.test.ts
+          src/services/invitation.integration.test.ts
 
   # ───────────────────────────────────────────────────────────────────────────
   # 2. Build and publish the backend image.
