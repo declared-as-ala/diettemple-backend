@@ -1,9 +1,13 @@
 export const REALTIME_ROOMS = {
   user: (userId: string) => `user:${userId}`,
+  /** Every connected admin (role "admin"): receives new/updated complaints. */
+  admins: 'admins',
 } as const;
 
 export const REALTIME_EVENTS = {
   userUpdated: 'user:updated',
+  /** A complaint was created or got a new message / status change (payload: { complaintId, kind }). */
+  complaintUpdated: 'complaint:updated',
 } as const;
 
 export type SubscriptionStatusRealtime = 'ACTIVE' | 'EXPIRED' | 'CANCELED' | 'NONE';

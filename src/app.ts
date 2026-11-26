@@ -34,6 +34,8 @@ import verificationRoutes from './routes/verification.routes';
 import foodsRoutes from './routes/foods.routes';
 import invitationsAdminRoutes from './routes/admin/invitations.routes';
 import { activationPageRouter, invitationsApiRouter } from './routes/invitations.public';
+import complaintsRoutes from './routes/complaints.routes';
+import complaintsAdminRoutes from './routes/admin/complaints.routes';
 import leadsRoutes from './routes/leads.routes';
 import landingRoutes from './routes/landing.routes';
 import supportRoutes from './routes/support.routes';
@@ -97,6 +99,8 @@ app.use('/api/admin/invitations', authenticate, requireAdmin, invitationsAdminRo
 // Public, rate-limited: the activation page and the invitation API (the client has no account yet).
 app.use('/activate', activationPageRouter);
 app.use('/api/invitations', invitationsApiRouter);
+app.use('/api/admin/complaints', authenticate, requireAdmin, complaintsAdminRoutes);
+app.use('/api/complaints', authenticate, complaintsRoutes);
 app.use('/api/admin', authenticate, requireAdminOrEmployee, adminRoutes);
 app.use('/api/admin/workout-plan', authenticate, requireAdmin, workoutPlanAdminRoutes);
 app.use('/api/foods', authenticate, foodsRoutes);

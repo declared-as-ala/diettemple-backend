@@ -63,6 +63,7 @@ export function initializeRealtimeServer(httpServer: HttpServer): Server {
     }
 
     socket.join(REALTIME_ROOMS.user(userId));
+    if (socket.data.role === 'admin') socket.join(REALTIME_ROOMS.admins);
     devLog(`socket connected user:${userId} socket:${socket.id}`);
 
     socket.on('disconnect', (reason) => {
@@ -78,4 +79,13 @@ export function getRealtimeServer(): Server {
     throw new Error('Realtime server not initialized');
   }
   return io;
+}
+
+/** Best-effort push to a connected client. Never throws: realtime is an enhancement, the data is always in the database. */
+export function emitToRoom(room: string, event: string, payload: unknown): void {
+  try {
+    io?.to(room).emit(event, payload);
+  } catch (e) {
+    devLog('emit failed', event, e);
+  }
 }
