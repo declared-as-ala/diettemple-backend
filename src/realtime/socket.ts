@@ -63,6 +63,7 @@ export function initializeRealtimeServer(httpServer: HttpServer): Server {
     }
 
     socket.join(REALTIME_ROOMS.user(userId));
+    socket.join(REALTIME_ROOMS.everyone);
     if (socket.data.role === 'admin') socket.join(REALTIME_ROOMS.admins);
     devLog(`socket connected user:${userId} socket:${socket.id}`);
 

@@ -23,7 +23,7 @@ router.get('/unread-count', async (req: AuthRequest, res) => {
 router.get('/exercises/:exerciseId', async (req: AuthRequest, res) => {
   try {
     const list = await listForClient(req.user._id, req.params.exerciseId);
-    res.json({ messages: list.map((m) => serialize(m, false)) });
+    res.json({ messages: list.map((m) => serialize(m, false, req.user._id)) });
   } catch (e) {
     fail(res, e);
   }

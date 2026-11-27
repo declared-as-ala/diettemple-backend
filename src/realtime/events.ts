@@ -2,6 +2,8 @@ export const REALTIME_ROOMS = {
   user: (userId: string) => `user:${userId}`,
   /** Every connected admin (role "admin"): receives new/updated complaints. */
   admins: 'admins',
+  /** Every connected user (exercise-wide coach messages). */
+  everyone: 'everyone',
 } as const;
 
 export const REALTIME_EVENTS = {

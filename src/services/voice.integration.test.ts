@@ -206,6 +206,59 @@ maybe('exercise voice messages (real MongoDB)', () => {
     await request(app).get(`/api/voice-messages/${m.id}/audio`).set('x-test-user', 'clientA').expect(404);
   });
 
+  it('exercise-wide message: one recording, seen by every client, read tracked per client', async () => {
+    const app = buildApp();
+    const post = () => request(app).post(`/api/admin/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'admin').set('X-Forwarded-For', `10.2.0.${ipCounter}`);
+    const g = (await post().attach('audio', AUDIO, 'tip.webm').field('durationSec', '20').field('body', 'Descends lentement').expect(201)).body.message;
+    expect(g).toMatchObject({ scope: 'exercise', clientId: null, hasAudio: true, durationSec: 20 });
+    expect([...files.keys()][0]).toMatch(new RegExp(`^voice/all/${ids.exoA}/[0-9a-f]{32}\\.webm$`));
+    // a client-specific message on the same exercise coexists
+    const own = (await send(app, 'clientA', 'exoA', { duration: '4' }).expect(201)).body.message;
+
+    const listA = (await request(app).get(`/api/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'clientA')).body.messages;
+    expect(listA.map((m: any) => m.id).sort()).toEqual([g.id, own.id].sort());
+    const listB = (await request(app).get(`/api/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'clientB')).body.messages;
+    expect(listB.map((m: any) => m.id)).toEqual([g.id]); // B never sees A's private message
+    expect((await request(app).get(`/api/voice-messages/exercises/${ids.exoB}`).set('x-test-user', 'clientB')).body.messages).toHaveLength(0); // other exercise: nothing
+
+    // unread counts include it, per client
+    expect((await request(app).get('/api/voice-messages/unread-count').set('x-test-user', 'clientA')).body.unread).toBe(2);
+    expect((await request(app).get('/api/voice-messages/unread-count').set('x-test-user', 'clientB')).body.unread).toBe(1);
+    // A reads the shared one: only A's counter changes
+    expect((await request(app).post('/api/voice-messages/read').set('x-test-user', 'clientA').send({ ids: [g.id] })).body.updated).toBe(1);
+    expect((await request(app).post('/api/voice-messages/read').set('x-test-user', 'clientA').send({ ids: [g.id] })).body.updated).toBe(0);
+    expect((await request(app).get('/api/voice-messages/unread-count').set('x-test-user', 'clientA')).body.unread).toBe(1);
+    expect((await request(app).get('/api/voice-messages/unread-count').set('x-test-user', 'clientB')).body.unread).toBe(1);
+    const again = (await request(app).get(`/api/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'clientA')).body.messages.find((m: any) => m.id === g.id);
+    expect(again.read).toBe(true);
+    expect((await request(app).get(`/api/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'clientB')).body.messages[0].read).toBe(false);
+    expect(again).not.toHaveProperty('readBy');
+
+    // both clients can stream it; the admin sees how many opened it; the per-client message stays private
+    await request(app).get(`/api/voice-messages/${g.id}/audio`).set('x-test-user', 'clientB').expect(200);
+    await request(app).get(`/api/voice-messages/${own.id}/audio`).set('x-test-user', 'clientB').expect(404);
+    const adminList = (await request(app).get(`/api/admin/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'admin')).body.messages;
+    expect(adminList).toHaveLength(1);
+    expect(adminList[0].readCount).toBe(1);
+    expect((await request(app).get('/api/admin/voice-messages/exercises').set('x-test-user', 'admin')).body.exercises).toEqual([{ exerciseId: String(ids.exoA), total: 1 }]);
+
+    // clients cannot create or use the admin routes
+    await request(app).post(`/api/admin/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'clientA').attach('audio', AUDIO, 'x.webm').expect(403);
+    // deleting removes it for everyone
+    await request(app).delete(`/api/admin/voice-messages/${g.id}`).set('x-test-user', 'admin').expect(200);
+    expect((await request(app).get(`/api/voice-messages/exercises/${ids.exoA}`).set('x-test-user', 'clientB')).body.messages).toHaveLength(0);
+    await request(app).get(`/api/voice-messages/${g.id}/audio`).set('x-test-user', 'clientA').expect(404);
+  });
+
+  it('exercise-wide message needs audio or text and a real exercise', async () => {
+    const app = buildApp();
+    const base = (id: any) => request(app).post(`/api/admin/voice-messages/exercises/${id}`).set('x-test-user', 'admin').set('X-Forwarded-For', `10.3.0.${ipCounter}`);
+    await base(ids.exoA).expect(400);
+    await base(new mongoose.Types.ObjectId()).attach('audio', AUDIO, 'x.webm').expect(404);
+    await base(ids.exoA).attach('audio', Buffer.from('not audio at all, plain text'), 'x.webm').expect(400);
+    expect(await VoiceMessage.countDocuments()).toBe(0);
+  });
+
   it('rate limits sending', async () => {
     const app = buildApp();
     let last = 0;

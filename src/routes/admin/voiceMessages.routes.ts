@@ -11,7 +11,7 @@ import multer from 'multer';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { rateLimit } from '../../middleware/rateLimit.middleware';
 import { MAX_AUDIO_BYTES } from '../../services/audio';
-import { createMessage, deleteMessage, listForAdmin, serialize, summaryForAdmin } from '../../services/voice.service';
+import { createMessage, deleteMessage, listForAdmin, listForExerciseAdmin, serialize, summaryForAdmin, summaryForExercises } from '../../services/voice.service';
 import { fail, streamAudio } from '../voiceMessages.shared';
 
 const router = Router();
@@ -23,6 +23,31 @@ const withUpload = (req: AuthRequest, res: Response, next: NextFunction) =>
     res.status(400).json({ message: code === 'LIMIT_FILE_SIZE' ? 'Message vocal trop lourd (8 Mo maximum).' : "Impossible de lire l'enregistrement." });
   });
 const sendLimiter = rateLimit({ name: 'voice-send', windowMs: 60 * 60 * 1000, max: 120, message: 'Trop de messages envoyés. Réessayez plus tard.' });
+
+router.get('/exercises', async (_req: AuthRequest, res) => {
+  try {
+    res.json({ exercises: await summaryForExercises() });
+  } catch (e) {
+    fail(res, e);
+  }
+});
+
+router.get('/exercises/:exerciseId', async (req: AuthRequest, res) => {
+  try {
+    res.json({ messages: (await listForExerciseAdmin(req.params.exerciseId)).map((m) => serialize(m, true)) });
+  } catch (e) {
+    fail(res, e);
+  }
+});
+
+router.post('/exercises/:exerciseId', sendLimiter, withUpload, async (req: AuthRequest, res) => {
+  try {
+    const msg = await createMessage(req.user._id, { clientId: null, exerciseId: req.params.exerciseId, body: req.body?.body, durationSec: req.body?.durationSec, audio: (req as any).file });
+    res.status(201).json({ message: serialize(msg, true) });
+  } catch (e) {
+    fail(res, e);
+  }
+});
 
 router.get('/clients/:clientId', async (req: AuthRequest, res) => {
   try {
