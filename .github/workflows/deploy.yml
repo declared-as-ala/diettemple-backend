@@ -66,7 +66,7 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
-      - name: Tests (recipes, history guard, client invitations, complaints, incl. real-database integration)
+      - name: Tests (recipes, history guard, client invitations, complaints, voice messages, incl. real-database integration)
         run: >
           npx jest --runInBand
           src/data/recipes
@@ -76,6 +76,8 @@ jobs:
           src/services/invitation.integration.test.ts
           src/services/complaint.unit.test.ts
           src/services/complaint.integration.test.ts
+          src/services/voice.unit.test.ts
+          src/services/voice.integration.test.ts
 
   # ───────────────────────────────────────────────────────────────────────────
   # 2. Build and publish the backend image.

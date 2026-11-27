@@ -13,6 +13,9 @@ export interface StoredObject {
 export interface PrivateStorage {
   put(key: string, data: Buffer, contentType: string): Promise<void>;
   get(key: string): Promise<StoredObject>;
+  /** Inclusive byte range (HTTP Range support for audio seeking). */
+  getRange(key: string, offset: number, length: number): Promise<StoredObject>;
+  remove(key: string): Promise<void>;
 }
 
 export const PRIVATE_BUCKET = 'private';
@@ -39,6 +42,13 @@ export async function getPrivateStorage(): Promise<PrivateStorage> {
       const stat = await minioClient.statObject(PRIVATE_BUCKET, key);
       const stream = await minioClient.getObject(PRIVATE_BUCKET, key);
       return { stream: stream as unknown as Readable, size: stat.size };
+    },
+    async getRange(key, offset, length) {
+      const stream = await minioClient.getPartialObject(PRIVATE_BUCKET, key, offset, length);
+      return { stream: stream as unknown as Readable, size: length };
+    },
+    async remove(key) {
+      await minioClient.removeObject(PRIVATE_BUCKET, key);
     },
   };
 }

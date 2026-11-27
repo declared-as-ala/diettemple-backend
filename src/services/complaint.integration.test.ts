@@ -27,6 +27,14 @@ const fakeStorage = {
     if (!f) throw new Error('NoSuchKey');
     return { stream: Readable.from([f.data]), size: f.data.length };
   },
+  async getRange(key: string, offset: number, length: number) {
+    const f = files.get(key);
+    if (!f) throw new Error('NoSuchKey');
+    return { stream: Readable.from([f.data.subarray(offset, offset + length)]), size: length };
+  },
+  async remove(key: string) {
+    files.delete(key);
+  },
 };
 
 const ids: Record<string, mongoose.Types.ObjectId> = {
